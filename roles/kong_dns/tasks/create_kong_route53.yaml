@@ -10,7 +10,7 @@
     value: "{{ lookup('ms3_inc.tavros.kube', kubeconfig='~/.kube/config', kind='Service', namespace='kong', resource_name=instance_kong_proxy).status.loadBalancer.ingress[0].hostname }}"
     overwrite: true
     wait: yes
-    wait_timeout: 900
+    wait_timeout: 3600
   vars:
     instance_kong_proxy: "kong-tavros-{{ item.name }}{{'-dp' if item.hybrid }}-kong-proxy"
   loop: "{{ kong.instances }}"
@@ -26,7 +26,7 @@
     value: "{{ lookup('ms3_inc.tavros.kube', kubeconfig='~/.kube/config', kind='Service', namespace='kong', resource_name=prod_kong_proxy).status.loadBalancer.ingress[0].hostname }}"
     overwrite: true
     wait: yes
-    wait_timeout: 900
+    wait_timeout: 3600
   vars:
     prod_kong_proxy: "kong-tavros-{{ (kong.instances | selectattr('ingress_class', 'equalto', kong.default_ingress_class) | first).name }}{{'-dp' if (kong.instances | selectattr('ingress_class', 'equalto', kong.default_ingress_class) | first).hybrid }}-kong-proxy"
 
@@ -41,7 +41,7 @@
     value: "{{ lookup('ms3_inc.tavros.kube', kubeconfig='~/.kube/config', kind='Service', namespace='kong', resource_name=instance_kong_proxy).status.loadBalancer.ingress[0].hostname }}"
     overwrite: true
     wait: yes
-    wait_timeout: 900
+    wait_timeout: 3600
   vars:
     instance_kong_proxy: "kong-tavros-{{ item.name }}{{'-dp' if item.hybrid }}-kong-proxy"
   loop: "{{ kong.instances }}"

@@ -3,6 +3,8 @@
   register: result
   changed_when: result.rc == 101
   failed_when: result.rc not in [100, 101]
+  args:
+    executable: /bin/bash
   shell: |
     kops get cluster \
       --name {{ cluster_fqdn }} \

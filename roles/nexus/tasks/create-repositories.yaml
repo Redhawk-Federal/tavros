@@ -1,9 +1,21 @@
 ---
-- name: Create DockerHub Proxy Repository
-  tags: [requires_cluster, non_idempotent, nexus]
+- name: Check if Docker repositories already exist
+  tags: [requires_cluster, nexus]
   when: ('dry-run' not in ansible_run_tags)
   uri:
-    url: "https://artifacts.{{ cluster_fqdn }}/nosso/service/rest/beta/repositories/docker/proxy"
+    url: "https://artifacts.{{ cluster_fqdn }}/nosso/service/rest/v1/repositories/docker/proxy/dockerhub-proxy"
+    method: GET
+    status_code: [200, 404]
+    headers:
+      Authorization: "Basic {{ ('admin:' + nexus.generated.admin_password ) | b64encode }}"
+    validate_certs: False
+  register: docker_repo_check
+
+- name: Create DockerHub Proxy Repository
+  tags: [requires_cluster, non_idempotent, nexus]
+  when: ('dry-run' not in ansible_run_tags) and (docker_repo_check.status == 404)
+  uri:
+    url: "https://artifacts.{{ cluster_fqdn }}/nosso/service/rest/v1/repositories/docker/proxy"
     method: POST
     status_code: 201
     headers:
@@ -39,9 +51,9 @@
 
 - name: Create Interal Container Registry Hosted Repository
   tags: [requires_cluster, non_idempotent, nexus]
-  when: ('dry-run' not in ansible_run_tags)
+  when: ('dry-run' not in ansible_run_tags) and (docker_repo_check.status == 404)
   uri:
-    url: "https://artifacts.{{ cluster_fqdn }}/nosso/service/rest/beta/repositories/docker/hosted"
+    url: "https://artifacts.{{ cluster_fqdn }}/nosso/service/rest/v1/repositories/docker/hosted"
     method: POST
     status_code: 201
     headers:
@@ -67,9 +79,9 @@
 
 - name: Create Container Registry Group Repository
   tags: [requires_cluster, non_idempotent, nexus]
-  when: ('dry-run' not in ansible_run_tags)
+  when: ('dry-run' not in ansible_run_tags) and (docker_repo_check.status == 404)
   uri:
-    url: "https://artifacts.{{ cluster_fqdn }}/nosso/service/rest/beta/repositories/docker/group"
+    url: "https://artifacts.{{ cluster_fqdn }}/nosso/service/rest/v1/repositories/docker/group"
     method: POST
     status_code: 201
     headers:

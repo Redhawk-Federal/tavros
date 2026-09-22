@@ -4,3 +4,6 @@ namespace: jaeger
 resources:
   - ns.yaml
   - https://github.com/jaegertracing/jaeger-operator/releases/download/v1.62.0/jaeger-operator.yaml
+images:
+  - name: gcr.io/kubebuilder/kube-rbac-proxy
+    newName: quay.io/brancz/kube-rbac-proxy

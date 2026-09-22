@@ -1,7 +1,7 @@
 ---
 - name: Create Directory
   file:
-    path: /tmp/kops
+    path: /home/jeremiah_smith/.kops
     state: directory
 
 - name: Create kOps S3 Bucket
@@ -18,7 +18,7 @@
 
 - name: Generate an OpenSSH Key Pair
   community.crypto.openssh_keypair:
-    path: /tmp/kops/id_rsa
+    path: /home/jeremiah_smith/.kops/id_rsa
 
 - name: Create Cluster Configuration
   register: result
@@ -26,9 +26,15 @@
   failed_when: result.rc not in [100, 101]
   environment:
     KOPS_STATE_STORE: s3://{{ kops.state_bucket }}
+  args:
+    executable: /bin/bash
   shell: |
     kops get cluster {{ cluster_fqdn }}
     if [[ $? -eq 0 ]]; then { exit 100; } fi
+
+    TOPOLOGY="{{ kops.topology | default('private') }}"
+    BASTION_ARG=""
+    if [ "$TOPOLOGY" = "private" ]; then BASTION_ARG="--bastion"; fi
 
     kops create cluster {{ cluster_fqdn }} \
       --cloud={{ kubernetes_cluster.cloud_provider }} \
@@ -39,12 +45,12 @@
       --node-size={{ kops.node_size }} \
       --zones={{ kops.node_zones }} \
       --container-runtime containerd \
-      --topology private \
+      --topology "$TOPOLOGY" \
+      $BASTION_ARG \
       --networking {{ kops.networking | default('cilium') }} \
       --dns-zone={{ kubernetes_cluster.dns_zone }} \
-      --bastion \
       --authorization RBAC \
-      --ssh-public-key /tmp/kops/id_rsa.pub
+      --ssh-public-key /home/jeremiah_smith/.kops/id_rsa.pub
     if [ $? -eq 0 ]; then { exit 101; } fi
 
     echo "Failed to create cluster"
@@ -53,16 +59,19 @@
 - name: Download Cluster Configuration
   when: result.changed
   changed_when: false
+  args:
+    executable: /bin/bash
   shell: |
-    aws s3 cp s3://{{ kops.state_bucket }}/{{ cluster_fqdn }}/cluster.spec /tmp/kops/cluster.spec
-    aws s3 cp s3://{{ kops.state_bucket }}/{{ cluster_fqdn }}/instancegroup /tmp/kops/instancegroup --recursive
+    set -e
+    aws s3 cp s3://{{ kops.state_bucket }}/{{ cluster_fqdn }}/config /home/jeremiah_smith/.kops/cluster.spec
+    aws s3 cp s3://{{ kops.state_bucket }}/{{ cluster_fqdn }}/instancegroup /home/jeremiah_smith/.kops/instancegroup --recursive
 
 - name: Add Extra Cluster Configurations
   when: result.changed
   changed_when: false
   copy:
-    content: "{{ lookup('file', '/tmp/kops/cluster.spec') | from_yaml | combine(extras, recursive=true) | to_nice_yaml(indent=2) }}"
-    dest: /tmp/kops/cluster.spec
+    content: "{{ lookup('file', '/home/jeremiah_smith/.kops/cluster.spec') | from_yaml | combine(extras, recursive=true) | to_nice_yaml(indent=2) }}"
+    dest: /home/jeremiah_smith/.kops/cluster.spec
   vars:
     extras:
       apiVersion: kops.k8s.io/v1alpha2
@@ -90,12 +99,51 @@
   environment:
     KOPS_STATE_STORE: s3://{{ kops.state_bucket }}
   shell: |
-    kops replace -f /tmp/kops/cluster.spec
+    kops replace -f /home/jeremiah_smith/.kops/cluster.spec
     if [ $? -ne 0 ]; then { echo "Failed to replace cluster config"; exit 1; } fi
 
     kops update cluster {{ cluster_fqdn }} --yes
     if [ $? -ne 0 ]; then { echo "Failed to update cluster"; exit 2; } fi
 
+    exit 101
+
+- name: Scale Nodes to kops.node_count
+  changed_when: scale_result.rc == 101
+  failed_when: scale_result.rc not in [100, 101]
+  register: scale_result
+  environment:
+    KOPS_STATE_STORE: s3://{{ kops.state_bucket }}
+  args:
+    executable: /bin/bash
+  shell: |
+    set -e
+    DESIRED="{{ kops.node_count }}"
+    # Node IGs are named nodes-<zone>, one per AZ. Distribute DESIRED across them.
+    IGS=$(kops get ig --name {{ cluster_fqdn }} | awk '/^nodes-/{print $1}')
+    IG_COUNT=$(echo "$IGS" | wc -l | tr -d ' ')
+    BASE=$(( DESIRED / IG_COUNT ))
+    REMAINDER=$(( DESIRED % IG_COUNT ))
+
+    CHANGED=0
+    IDX=0
+    for IG in $IGS; do
+      EXTRA=$(( IDX < REMAINDER ? 1 : 0 ))
+      SIZE=$(( BASE + EXTRA ))
+      CURRENT_MIN=$(kops get ig $IG --name {{ cluster_fqdn }} -o yaml | awk '/minSize/{print $2}')
+      CURRENT_MAX=$(kops get ig $IG --name {{ cluster_fqdn }} -o yaml | awk '/maxSize/{print $2}')
+      if [ "$CURRENT_MIN" != "$SIZE" ] || [ "$CURRENT_MAX" != "$SIZE" ]; then
+        kops get ig $IG --name {{ cluster_fqdn }} -o yaml \
+          | sed "s/minSize:.*/minSize: $SIZE/" \
+          | sed "s/maxSize:.*/maxSize: $SIZE/" \
+          | kops replace -f /dev/stdin
+        CHANGED=1
+      fi
+      IDX=$(( IDX + 1 ))
+    done
+
+    if [ "$CHANGED" = "0" ]; then exit 100; fi
+    kops update cluster {{ cluster_fqdn }} --yes
+    kops rolling-update cluster {{ cluster_fqdn }} --yes
     exit 101
 
 - name: Wait for DNS zone propagation

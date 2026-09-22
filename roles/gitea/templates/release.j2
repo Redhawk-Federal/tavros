@@ -18,9 +18,11 @@ spec:
         name: gitea
         namespace: flux-system
   install:
+    timeout: 15m
     remediation:
       retries: 5
   upgrade:
+    timeout: 15m
     remediation:
       retries: 5
   values:
@@ -60,6 +62,10 @@ spec:
         builtIn:
           postgresql:
             enabled: false
+
+    memcached:
+      image:
+        tag: latest
 
 {% if ('test-run' in ansible_run_tags) %}
     extraVolumes:

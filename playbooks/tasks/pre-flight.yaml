@@ -19,7 +19,6 @@
       HelmRelease:
         type: Ready
         status: true
-        reason: ReconciliationSucceeded
       CustomResourceDefinition:
         type: Established
         status: true
