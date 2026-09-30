@@ -21,7 +21,7 @@ spec:
   # https://github.com/sonatype/helm3-charts/blob/master/charts/nexus-repository-manager/values.yaml
   values:
     image:
-      tag: "3.70.5"
+      tag: "3.69.0"
     deployment:
       additionalVolumes:
         - name: keycloak-config
