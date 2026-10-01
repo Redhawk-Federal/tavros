@@ -81,7 +81,7 @@
     definition: "{{ item }}"
     wait: true
     wait_condition: "{{ wait_conditions[item.kind] | default(omit) }}"
-    wait_timeout: 900
+    wait_timeout: 3600
 
 - name: Wait for Keycloak Operator
   tags: [requires_cluster, keycloak]
@@ -109,7 +109,7 @@
     definition: "{{ item }}"
     wait: true
     wait_condition: "{{ wait_conditions[item.kind] | default(omit) }}"
-    wait_timeout: 900
+    wait_timeout: 3600
 
 - name: Wait for Keycloak
   tags: [requires_cluster, keycloak]

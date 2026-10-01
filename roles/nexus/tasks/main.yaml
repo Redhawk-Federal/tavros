@@ -27,6 +27,9 @@
       dest: default/keycloakclient
     - name: kongplugin-oidc
       dest: default/kongplugin-oidc
+      condition: "{{ kong.ee_creds | length > 0 }}"
+    - name: kustomization
+      dest: kustomization
     - name: secret-keycloak-config
       dest: default/secret-keycloak-config
   tags: [nexus]
@@ -38,7 +41,6 @@
   when: item.condition | default(true)
   loop:
     - name: ns.yaml
-    - name: kustomization.yaml
     - name: release.yaml
       dest: default/release.yaml
     - name: service-container-registry.yaml
@@ -69,7 +71,7 @@
     definition: "{{ item }}"
     wait: true
     wait_condition: "{{ wait_conditions[item.kind] | default(omit) }}"
-    wait_timeout: 900
+    wait_timeout: 3600
 
 - name: Wait for Nexus
   tags: [requires_cluster, nexus]
@@ -81,7 +83,7 @@
       - "app.kubernetes.io/name = nexus-repository-manager"
     namespace: nexus
     wait: true
-    wait_timeout: 900
+    wait_timeout: 3600
   changed_when: false
 
 - name: Retreive admin.password
@@ -92,7 +94,7 @@
     namespace: nexus
     pod: "{{ lookup('kubernetes.core.k8s', kubeconfig='~/.kube/config', kind='Pod', namespace='nexus', label_selector=nexus_pod_name).metadata.name }}"
     command: |
-      cat nexus-data/admin.password
+      cat /nexus-data/admin.password
   vars:
     nexus_pod_name: "app.kubernetes.io/name=nexus-repository-manager"
   register: nexus_creds

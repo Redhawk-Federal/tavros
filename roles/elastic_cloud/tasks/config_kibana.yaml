@@ -19,13 +19,14 @@
     headers:
       kbn-xsrf: "true"
   loop:
-    - kubernetes-0.5.2
-    - postgresql-0.4.0
-    - nginx-0.5.0
+    - kubernetes-1.83.1
+    - postgresql-1.31.0
+    - nginx-3.2.2
   register: _result
-  until: _result.status == 200
+  until: _result.status in [200, 400]
   retries: 10
   delay: 30
+  failed_when: _result.status not in [200, 400]
   no_log: True
 
 - name: Import Kibana Objects

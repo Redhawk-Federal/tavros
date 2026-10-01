@@ -1,30 +1,82 @@
-apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
+---
+apiVersion: v1
+kind: Service
 metadata:
-  name: tavros
+  name: tavros-postgresql
   namespace: postgresql
 spec:
-  releaseName: tavros
-  chart:
-    spec:
-      chart: postgresql
-      sourceRef:
-        kind: HelmRepository
-        name: bitnami
-        namespace: flux-system
-      version: 10.3.17
-  interval: 30m
-  install:
-    remediation:
-      retries: 3
-  # Default values
-  # https://github.com/bitnami/charts/blob/4c72712f8d0c79ca3b573c87b993bfe80fc99b01/bitnami/postgresql/values.yaml
-  values:
-    postgresqlDatabase: postgres
-    existingSecret: tavros-pg-creds
+  selector:
+    app: tavros-postgresql
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tavros-postgresql-headless
+  namespace: postgresql
+spec:
+  clusterIP: None
+  selector:
+    app: tavros-postgresql
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tavros-postgresql
+  namespace: postgresql
+spec:
+  serviceName: tavros-postgresql-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tavros-postgresql
+  template:
+    metadata:
+      labels:
+        app: tavros-postgresql
 {% if elastic_cloud.enabled %}
-    primary:
-      podAnnotations:
+      annotations:
         co.elastic.logs.tavros-postgresql/enabled: "true"
         co.elastic.logs.tavros-postgresql/module: "postgresql"
-{% endif  %}
+{% endif %}
+    spec:
+      containers:
+        - name: postgresql
+          image: docker.io/library/postgres:17
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tavros-pg-creds
+                  key: postgresql-password
+            - name: POSTGRES_DB
+              value: postgres
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgresql
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, postgres]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 8Gi

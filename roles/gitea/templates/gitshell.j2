@@ -17,6 +17,6 @@ spec:
     spec:
       containers:
       - name: git
-        image: bitnami/git:2.41.0
-        command: [ "/bin/bash", "-c", "--" ]
+        image: alpine/git:2.54.0
+        command: [ "/bin/sh", "-c" ]
         args: [ "while true; do sleep 30; done;" ]

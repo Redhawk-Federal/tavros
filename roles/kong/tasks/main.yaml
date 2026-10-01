@@ -26,10 +26,10 @@
     - name: helmrepo.yaml
 
 - include_tasks: process-instances.yaml
-  when: kong.instances
+  when: kong.instances | length > 0
 
 - include_tasks: process-ee-creds.yaml
-  when: kong.ee_creds
+  when: kong.ee_creds | length > 0
 
 - name: Apply Resources
   tags: [requires_cluster]
@@ -42,7 +42,7 @@
     definition: "{{ item }}"
     wait: true
     wait_condition: "{{ wait_conditions[item.kind] | default(omit) }}"
-    wait_timeout: 900
+    wait_timeout: 3600
 
 - name: Wait for LoadBalancer IPs
   tags: [requires_cluster]

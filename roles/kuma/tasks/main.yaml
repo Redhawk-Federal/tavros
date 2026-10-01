@@ -41,7 +41,7 @@
     definition: "{{ item }}"
     wait: true
     wait_condition: "{{ wait_conditions[item.kind] | default(omit) }}"
-    wait_timeout: 900
+    wait_timeout: 3600
 
 - name: Template flux-kustomization
   template:

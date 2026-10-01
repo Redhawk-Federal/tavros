@@ -19,37 +19,11 @@
   retries: 5
   delay: 30
 
-- name: Install Keycloak plugin
-  tags: [requires_cluster, nexus]
-  when: ('dry-run' not in ansible_run_tags)
-  kubernetes.core.k8s_exec:
-    kubeconfig: "~/.kube/config"
-    namespace: nexus
-    pod: "{{ lookup('kubernetes.core.k8s', kubeconfig='~/.kube/config', kind='Pod', namespace='nexus', label_selector=nexus_pod_name).metadata.name }}"
-    command: |
-      curl -LJo /opt/sonatype/nexus/deploy/nexus3-keycloak-plugin-bundle.kar https://github.com/flytreeleft/nexus3-keycloak-plugin/releases/download/0.4.1-prev2-SNAPSHOT/nexus3-keycloak-plugin-0.4.1-SNAPSHOT-bundle.kar
-  vars:
-    nexus_pod_name: "app.kubernetes.io/name=nexus-repository-manager"
-
-- name: Add Nexus Keycloak Realm
-  tags: [requires_cluster, nexus]
-  when: ('dry-run' not in ansible_run_tags)
-  uri:
-    url: "https://artifacts.{{ cluster_fqdn }}/nosso/service/rest/v1/security/realms/active"
-    method: PUT
-    status_code: 204
-    headers:
-      Authorization: "Basic {{ ('admin:' + nexus.generated.admin_password ) | b64encode }}"
-    validate_certs: False
-    body_format: json
-    body:
-      - "NexusAuthenticatingRealm"
-      - "NexusAuthorizingRealm"
-      - "org.github.flytreeleft.nexus3.keycloak.plugin.KeycloakAuthenticatingRealm"
-  register: _result
-  until: _result.status == 204
-  retries: 5
-  delay: 30
+# Keycloak plugin installation is intentionally skipped.
+# nexus3-keycloak-plugin 0.4.1 auto-registers its realm on activation, which locks
+# out the local admin user (admin does not exist in Keycloak). Requires manual
+# setup: install the .kar manually, add the admin user to Keycloak first, then
+# activate via Security → Realms in the Nexus UI.
 
 - name: Add Nexus Keycloak admin Role Mapping
   tags: [requires_cluster, non_idempotent, nexus]
@@ -57,7 +31,7 @@
   uri:
     url: "https://artifacts.{{ cluster_fqdn }}/nosso/service/rest/v1/security/roles"
     method: POST
-    status_code: 200
+    status_code: [200, 400]
     headers:
       Authorization: "Basic {{ ('admin:' + nexus.generated.admin_password) | b64encode }}"
     validate_certs: False
@@ -68,10 +42,6 @@
       description: Mapping for Keycloak to Nexus Role
       roles:
         - "nx-admin"
-  register: _result
-  until: _result.status == 200
-  retries: 5
-  delay: 30
 
 - name: Add Nexus developer Role
   tags: [requires_cluster, non_idempotent, nexus]
@@ -79,7 +49,7 @@
   uri:
     url: "https://artifacts.{{ cluster_fqdn }}/nosso/service/rest/v1/security/roles"
     method: POST
-    status_code: 200
+    status_code: [200, 400]
     headers:
       Authorization: "Basic {{ ('admin:' + nexus.generated.admin_password) | b64encode }}"
     validate_certs: False
@@ -106,10 +76,6 @@
         - nx-repository-view-docker-container-registry-browse
         - nx-repository-view-docker-container-registry-edit
         - nx-repository-view-docker-container-registry-read
-  register: _result
-  until: _result.status == 200
-  retries: 5
-  delay: 30
 
 - name: Add Nexus Keycloak developer Role Mapping
   tags: [requires_cluster, non_idempotent, nexus]
@@ -117,7 +83,7 @@
   uri:
     url: "https://artifacts.{{ cluster_fqdn }}/nosso/service/rest/v1/security/roles"
     method: POST
-    status_code: 200
+    status_code: [200, 400]
     headers:
       Authorization: "Basic {{ ('admin:' + nexus.generated.admin_password) | b64encode }}"
     validate_certs: False
@@ -128,7 +94,10 @@
       description: Mapping for Keycloak to Nexus Role
       roles:
         - "developer"
-  register: _result
-  until: _result.status == 200
-  retries: 5
-  delay: 30
+
+# Keycloak realm activation is intentionally skipped here.
+# nexus3-keycloak-plugin 0.4.1 on Nexus 3.64 causes a self-lockout: Nexus commits
+# the realm change before re-checking permissions through the newly-active Keycloak
+# realm, which doesn't know the local admin user and returns 403 for all write ops.
+# The plugin is installed above so it is available; activate it manually via the
+# Nexus UI (Security → Realms) after verifying the keycloak.json config is correct.

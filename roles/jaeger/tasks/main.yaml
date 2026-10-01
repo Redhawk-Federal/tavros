@@ -34,6 +34,9 @@
       dest: default/keycloakclient
     - name: kongplugin-oidc
       dest: default/kongplugin-oidc
+      condition: "{{ kong.ee_creds | length > 0 }}"
+    - name: kustomization
+      dest: kustomization
     - name: secret-es-creds
       dest: default/secret-es-creds
     - name: secret-es-http-certs
@@ -46,7 +49,6 @@
     dest: /tmp/{{ cluster_fqdn }}/platform/jaeger/{{ item.dest | default(item.name) }}
   when: item.condition | default(true)
   loop:
-    - name: kustomization.yaml
     - name: cronjob-spark-dependencies.yaml
       dest: default/cronjob-spark-dependencies.yaml
     - name: jaeger.yaml
@@ -76,7 +78,7 @@
     definition: "{{ item }}"
     wait: true
     wait_condition: "{{ wait_conditions[item.kind] | default(omit) }}"
-    wait_timeout: 900
+    wait_timeout: 3600
   ignore_errors: true
   # allow errors because deployment initially fails due to jaeger-operator-service-cert secret not created before the deployment is
   # unsure of how to change the order

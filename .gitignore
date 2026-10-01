@@ -7,3 +7,5 @@ ms3_inc-tavros-*.tar.gz
 # Local ansible-lint / ansible-galaxy working dirs
 .ansible/
 .cache/
+cdx-mosa-vars.yaml
+.venv/

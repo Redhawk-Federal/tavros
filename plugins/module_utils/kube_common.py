@@ -48,7 +48,11 @@ class KubeBase(object):
         if result is None:
             return None
 
-        return dict(yaml.safe_load(result))
+        parsed = yaml.safe_load(result)
+        if parsed is None:
+            return None
+
+        return dict(parsed)
 
     def _wait_for(self, kind, name, namespace, predicate, sleep, timeout, state):
         start = datetime.now()
@@ -60,10 +64,8 @@ class KubeBase(object):
         while _wait_for_elapsed() < timeout:
             response = self._get_resource(kind, name=name, namespace=namespace)
 
-            if predicate(attr_dict(response)):
-                if response:
-                    return True, response, _wait_for_elapsed()
-                return True, {}, _wait_for_elapsed()
+            if response is not None and predicate(attr_dict(response)):
+                return True, response, _wait_for_elapsed()
             time.sleep(sleep)
 
         return False, response, _wait_for_elapsed()

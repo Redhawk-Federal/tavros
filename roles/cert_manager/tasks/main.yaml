@@ -35,7 +35,7 @@
     definition: "{{ item }}"
     wait: true
     wait_condition: "{{ wait_conditions[item.kind] | default(omit) }}"
-    wait_timeout: 900
+    wait_timeout: 3600
   # adding retry because cert-manager release reports ready before CRDs are stable
   # applying these is an idempotent operation
   # see https://github.com/MS3Inc/tavros/issues/34

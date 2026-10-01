@@ -59,7 +59,7 @@
     definition: "{{ item }}"
     wait: true
     wait_condition: "{{ wait_conditions[item.kind] | default(omit) }}"
-    wait_timeout: 900
+    wait_timeout: 3600
 
 - include_tasks: keycloak_sso.yaml
   tags: [requires_cluster, gitea]
@@ -80,7 +80,7 @@
       username: tavros
       visibility: limited
       repo_admin_change_team_access: true
-    status_code: 201
+    status_code: [201, 422]
     validate_certs: False
 
 - name: Template flux-kustomization
