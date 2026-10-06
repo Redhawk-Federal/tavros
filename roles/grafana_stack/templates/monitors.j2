@@ -1,0 +1,137 @@
+# Scrape targets for the platform components. They live in the stack
+# namespace (or the Kuma namespace for mesh policies) and belong to this role, so the
+# component roles stay untouched when grafana_stack is disabled.
+{% for instance in kong.instances %}
+---
+# Kong prometheus plugin, enabled globally for the {{ instance.name }} instance.
+# Metrics are served on the status listener (8100).
+apiVersion: configuration.konghq.com/v1
+kind: KongClusterPlugin
+metadata:
+  name: tavros-prometheus-{{ instance.name }}
+  annotations:
+    kubernetes.io/ingress.class: {{ instance.ingress_class }}
+  labels:
+    global: "true"
+plugin: prometheus
+config:
+  status_code_metrics: true
+  latency_metrics: true
+  bandwidth_metrics: true
+  upstream_health_metrics: true
+{% endfor %}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kong
+  namespace: {{ grafana_stack.namespace }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ grafana_stack_targets.kong.namespace }}]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kong
+  podMetricsEndpoints:
+    - portNumber: {{ grafana_stack_targets.kong.port }}
+      path: /metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance]
+          targetLabel: kong_instance
+{% if kuma.enabled %}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kuma-control-plane
+  namespace: {{ grafana_stack.namespace }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ grafana_stack_targets.kuma.namespace }}]
+  selector:
+    matchLabels:
+      app: kuma-control-plane
+  podMetricsEndpoints:
+    - portNumber: {{ grafana_stack_targets.kuma.port }}
+      path: /metrics
+---
+# Data plane proxies are discovered through the Kuma monitoring assignment
+# service (MADS); MeshMetric below tells each proxy to expose metrics.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: kuma-dataplanes
+  namespace: {{ grafana_stack.namespace }}
+spec:
+  kumaSDConfigs:
+    - server: http://kuma-control-plane.{{ grafana_stack_targets.kuma.namespace }}.svc:{{ grafana_stack_targets.kuma.mads_port }}
+      clientID: tavros-prometheus
+  relabelings:
+    - sourceLabels: [__meta_kuma_mesh]
+      targetLabel: mesh
+    - sourceLabels: [__meta_kuma_dataplane]
+      targetLabel: dataplane
+    - sourceLabels: [__meta_kuma_service]
+      targetLabel: service
+    - action: labelmap
+      regex: __meta_kuma_label_(.+)
+{% for mesh in kuma.meshes %}
+---
+apiVersion: kuma.io/v1alpha1
+kind: MeshMetric
+metadata:
+  name: tavros-prometheus-{{ mesh.name }}
+  namespace: {{ grafana_stack_targets.kuma.namespace }}
+  labels:
+    kuma.io/mesh: {{ mesh.name }}
+spec:
+  targetRef:
+    kind: Mesh
+  default:
+    sidecar:
+      profiles:
+        appendProfiles:
+          - name: Basic
+    backends:
+      - type: Prometheus
+        prometheus:
+          clientId: tavros-prometheus
+          port: {{ grafana_stack_targets.kuma.dataplane_port }}
+          path: /metrics
+{% endfor %}
+{% endif %}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: flux
+  namespace: {{ grafana_stack.namespace }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ grafana_stack_targets.flux.namespace }}]
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [helm-controller, kustomize-controller, notification-controller, source-controller]
+  podMetricsEndpoints:
+    - portNumber: {{ grafana_stack_targets.flux.port }}
+      path: /metrics
+{% if cert_manager.enabled %}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cert-manager
+  namespace: {{ grafana_stack.namespace }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ grafana_stack_targets.cert_manager.namespace }}]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cert-manager
+      app.kubernetes.io/component: controller
+  podMetricsEndpoints:
+    - portNumber: {{ grafana_stack_targets.cert_manager.port }}
+      path: /metrics
+{% endif %}

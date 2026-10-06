@@ -1,0 +1,102 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tavros-loki
+  namespace: {{ grafana_stack.namespace }}
+spec:
+  targetNamespace: {{ grafana_stack.namespace }}
+  releaseName: tavros-loki
+  # The chart ships a ServiceMonitor; its CRD comes from kube-prometheus-stack.
+  dependsOn:
+    - name: tavros
+  interval: 30m
+  timeout: 10m
+  chart:
+    spec:
+      # https://github.com/grafana/helm-charts/tree/helm-loki-7.3.0/charts/loki
+      chart: loki
+      version: 7.3.0
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # One process with every Loki component and local filesystem storage:
+    # enough for a single-tenant platform (ADR-0029). Scale out by switching to
+    # SimpleScalable with object storage.
+    deploymentMode: SingleBinary
+    fullnameOverride: tavros-loki
+    loki:
+      auth_enabled: false
+      commonConfig:
+        replication_factor: 1
+      storage:
+        type: filesystem
+      schemaConfig:
+        configs:
+          - from: "2024-01-01"
+            store: tsdb
+            object_store: filesystem
+            schema: v13
+            index:
+              prefix: index_
+              period: 24h
+      limits_config:
+        retention_period: {{ grafana_stack.loki.retention }}
+        allow_structured_metadata: true
+        volume_enabled: true
+      compactor:
+        retention_enabled: true
+        delete_request_store: filesystem
+        working_directory: /var/loki/compactor
+      rulerConfig:
+        enable_api: true
+        alertmanager_url: {{ grafana_stack_alertmanager_url }}
+        # Rules come from ConfigMaps labelled loki_rule, written by the chart's
+        # sidecar under /rules/<tenant> ("fake" when auth is disabled).
+        storage:
+          type: local
+          local:
+            directory: /rules
+        rule_path: /var/loki/rules-tmp
+        wal:
+          dir: /var/loki/ruler-wal
+      pattern_ingester:
+        enabled: false
+    singleBinary:
+      replicas: 1
+      resources:
+{{ grafana_stack.resources.loki | to_nice_yaml(indent=2) | indent(8, true) }}
+      persistence:
+        enabled: true
+        size: {{ grafana_stack.loki.storage }}
+    sidecar:
+      rules:
+        folder: /rules/fake
+    monitoring:
+      serviceMonitor:
+        enabled: true
+    read:
+      replicas: 0
+    write:
+      replicas: 0
+    backend:
+      replicas: 0
+    gateway:
+      enabled: false
+    chunksCache:
+      enabled: false
+    resultsCache:
+      enabled: false
+    lokiCanary:
+      enabled: false
+    test:
+      enabled: false
+    minio:
+      enabled: false

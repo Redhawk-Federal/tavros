@@ -1,0 +1,173 @@
+---
+- name: Merge grafana_stack Defaults
+  set_fact:
+    grafana_stack: "{{ grafana_stack_defaults | combine(grafana_stack | default({}), recursive=true) }}"
+  tags: [grafana_stack]
+
+# Grafana signs users in through Keycloak: the client, the OAuth settings and
+# the realm admin role all depend on it, and the platform does not provision
+# without it either.
+- name: Assert Keycloak is Enabled
+  assert:
+    that: keycloak.enabled | default(true) | bool
+    fail_msg: "grafana_stack requires keycloak.enabled: Grafana logs in through a Keycloak client."
+    quiet: true
+  tags: [grafana_stack]
+
+- name: Create Directories
+  file:
+    path: "/tmp/{{ cluster_fqdn }}/platform/{{ item }}"
+    state: directory
+  loop:
+    - grafana-stack
+    - grafana-stack-monitors
+  tags: [grafana_stack]
+
+- name: Generate Keycloak Client Secret
+  when: grafana_stack.keycloak.client_secret is not defined
+  set_fact:
+    grafana_stack: "{{ grafana_stack | combine({'keycloak': {'client_secret': secret}}, recursive=true) }}"
+  vars:
+    secret: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=32') }}"
+  tags: [grafana_stack]
+
+- name: Generate Grafana Admin Password
+  when: (grafana_stack.grafana | default({})).admin_password is not defined
+  set_fact:
+    grafana_stack: "{{ grafana_stack | combine({'grafana': {'admin_password': password}}, recursive=true) }}"
+  vars:
+    password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=32') }}"
+  tags: [grafana_stack]
+
+- name: List Dashboards
+  set_fact:
+    grafana_stack_dashboards: "{{ (query('ansible.builtin.fileglob', role_path + '/files/dashboards/*.json')
+      + (query('ansible.builtin.fileglob', role_path + '/files/dashboards-loki/*.json') if grafana_stack.loki.enabled else [])) | sort }}"
+  tags: [grafana_stack]
+
+- name: Template Files
+  template:
+    src: "{{ item.name }}.j2"
+    dest: "/tmp/{{ cluster_fqdn }}/platform/{{ item.dest }}"
+  loop:
+    - { name: kustomization, dest: grafana-stack/kustomization.yaml }
+    - { name: ns, dest: grafana-stack/ns.yaml }
+    - { name: secret-grafana, dest: grafana-stack/secret-grafana.yaml }
+    - { name: release, dest: grafana-stack/release.yaml }
+    - { name: release-loki, dest: grafana-stack/release-loki.yaml, condition: "{{ grafana_stack.loki.enabled }}" }
+    - { name: alloy-config, dest: grafana-stack/alloy-config.yaml, condition: "{{ grafana_stack.loki.enabled }}" }
+    - { name: release-alloy, dest: grafana-stack/release-alloy.yaml, condition: "{{ grafana_stack.loki.enabled }}" }
+    - { name: loki-rules, dest: grafana-stack/loki-rules.yaml, condition: "{{ grafana_stack.loki.enabled }}" }
+    - { name: keycloakclient, dest: grafana-stack/keycloakclient.yaml }
+    - { name: ingress, dest: grafana-stack/ingress.yaml }
+    - { name: dashboards, dest: grafana-stack/dashboards.yaml }
+    - { name: monitors, dest: grafana-stack-monitors/monitors.yaml }
+  when: item.condition | default(true) | bool
+  tags: [grafana_stack]
+
+- name: Copy Files
+  copy:
+    src: "{{ item.name }}"
+    dest: "/tmp/{{ cluster_fqdn }}/platform/{{ item.dest }}"
+  loop:
+    - { name: helmrepo.yaml, dest: grafana-stack/helmrepo.yaml }
+    - { name: helmrepo-grafana.yaml, dest: grafana-stack/helmrepo-grafana.yaml, condition: "{{ grafana_stack.loki.enabled }}" }
+    - { name: monitors-kustomization.yaml, dest: grafana-stack-monitors/kustomization.yaml }
+  when: item.condition | default(true) | bool
+  tags: [grafana_stack]
+
+- name: Seal Secrets
+  tags: [requires_cluster, grafana_stack]
+  when: ('dry-run' not in ansible_run_tags)
+  shell: |
+    set -o pipefail
+    f=/tmp/{{ cluster_fqdn }}/platform/grafana-stack/secret-grafana.yaml
+    kubeseal --format=yaml <"$f" >"$f.tmp"
+    mv "$f.tmp" "$f"
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+# Applied in kustomization order (reorder='none', like cert_manager): the
+# default legacy sort puts HelmRelease before HelmRepository, and the wait on
+# the release would never finish without its chart source.
+- name: Apply Resources
+  tags: [requires_cluster, grafana_stack]
+  when: ('dry-run' not in ansible_run_tags)
+  loop: "{{ lookup('ms3_inc.tavros.kustomize', '/tmp/' + cluster_fqdn + '/platform/grafana-stack/', reorder='none') }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name | default('unnamed') }}"
+  ms3_inc.tavros.kube:
+    kubeconfig: "~/.kube/config"
+    definition: "{{ item }}"
+    wait: true
+    wait_condition: "{{ wait_conditions[item.kind] | default(omit) }}"
+    wait_timeout: 1200
+
+- name: Wait for prometheus-operator CRDs
+  tags: [requires_cluster, grafana_stack]
+  when: ('dry-run' not in ansible_run_tags)
+  ms3_inc.tavros.kube_info:
+    kubeconfig: "~/.kube/config"
+    api_version: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: "{{ item }}"
+  register: crd
+  until: (crd.resources | length) > 0
+  retries: 30
+  delay: 10
+  changed_when: false
+  loop:
+    - podmonitors.monitoring.coreos.com
+    - scrapeconfigs.monitoring.coreos.com
+
+- name: Apply Monitors
+  tags: [requires_cluster, grafana_stack]
+  when: ('dry-run' not in ansible_run_tags)
+  with_ms3_inc.tavros.kustomize: "/tmp/{{ cluster_fqdn }}/platform/grafana-stack-monitors/"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name | default('unnamed') }}"
+  ms3_inc.tavros.kube:
+    kubeconfig: "~/.kube/config"
+    definition: "{{ item }}"
+
+- name: Wait for Keycloak Client
+  tags: [requires_cluster, grafana_stack]
+  when: ('dry-run' not in ansible_run_tags)
+  ms3_inc.tavros.kube_info:
+    kubeconfig: "~/.kube/config"
+    api_version: keycloak.org/v1alpha1
+    kind: KeycloakClient
+    name: tavros-grafana
+    namespace: "{{ grafana_stack_keycloak_namespace }}"
+  register: keycloak_def
+  until: ('status' in keycloak_def.resources[0]) and (keycloak_def.resources[0].status.ready)
+  retries: 30
+  delay: 30
+  changed_when: false
+
+- name: Add Keycloak grafana Client Role admin to Realm Admin User
+  blockinfile:
+    marker_begin: "Begin grafana"
+    marker_end: "End grafana"
+    path: "/tmp/{{ cluster_fqdn }}/platform/keycloak/default/{{ grafana_stack.keycloak.realm }}/keycloakuser-admin.yaml"
+    insertafter: "    clientRoles:"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK"
+    block: |2
+            grafana:
+              - admin
+  tags: [grafana_stack]
+
+- name: Apply Updated Keycloak Realm Admin User Resource
+  tags: [requires_cluster, grafana_stack]
+  when: ('dry-run' not in ansible_run_tags)
+  ms3_inc.tavros.kube:
+    kubeconfig: "~/.kube/config"
+    state: present
+    src: "/tmp/{{ cluster_fqdn }}/platform/keycloak/default/{{ grafana_stack.keycloak.realm }}/keycloakuser-admin.yaml"
+
+- name: Process flux-kustomization template
+  template:
+    src: flux-kustomization.j2
+    dest: "/tmp/{{ cluster_fqdn }}/platform/flux-system/watches/grafana-stack.yaml"
+  tags: [grafana_stack]

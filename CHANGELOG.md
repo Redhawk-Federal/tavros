@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New optional `grafana_stack` role (kube-prometheus-stack 91.8.2: Prometheus Operator, Prometheus, Alertmanager, Grafana, node-exporter, kube-state-metrics, with optional Loki and Grafana Alloy for logs). Disabled by default and independent of `elastic_cloud`/`jaeger`. It adds Grafana at `grafana.<fqdn>` with Keycloak login, scraping for Kong, Kuma (control and data planes), Flux and cert-manager, and vendored dashboards. See ADR-0031.
+
 - `phase0`: GitHub Actions lint workflow running yamllint, ansible-lint, shellcheck, and gitleaks on PR and main.
 - `phase0`: Repo-root `.yamllint` and `.ansible-lint` configurations.
 - `phase0`: Dependabot configuration covering GitHub Actions, pip, and Docker base images.
@@ -16,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `phase1`: New `kops.networking` variable (default `cilium`) so users can override the CNI without editing role tasks.
 - `phase2`: New `requirements.yml` mirroring `galaxy.yml` collection deps so contributors can run `ansible-galaxy collection install --force-with-deps -r requirements.yml`.
 - `phase3`: README "Supported Platform Components" table updated to reflect the versions provisioned after phases 0–3, with added rows for Kubernetes (1.32), kOps (1.30), Cilium, cert-manager, PostgreSQL, and Gitea. Footnotes added clarifying that Keycloak is pinned to the legacy 19.0.3 operator pending the Keycloak 26 migration, and that SonarQube is an intended component (ADR-0015) not yet automated by a role.
+
+### Fixed
+
+- The kustomize lookup failed on kustomize v5 (pinned at 5.4.0), because it passed removed flags; `reorder=none` now maps to `sortOptions.order: fifo`.
+- Non-boolean conditionals in the `kong` role, which ansible-core 2.21 rejects.
+- HelmRelease waits expected the v2beta1 reason `ReconciliationSucceeded`, so they always timed out on Flux 2.x.
 
 ### Changed
 

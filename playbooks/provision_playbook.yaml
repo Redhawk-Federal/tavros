@@ -92,6 +92,12 @@
           when: jaeger.enabled and not elastic_cloud.ee.enabled
           tags: [jaeger]
 
+        - name: Grafana Stack
+          include_role:
+            name: ms3_inc.tavros.grafana_stack
+          when: grafana_stack.enabled | default(false)
+          tags: [grafana_stack]
+
         - name: Gitea
           include_role:
             name: ms3_inc.tavros.gitea
@@ -141,6 +147,7 @@
               - "cert_manager"
               - "gitea"
               - "jaeger"
+              - "grafana_stack"
               - "jenkins"
 
         - include_role:

@@ -16,10 +16,11 @@
 - name: Add Custom wait_conditions
   set_fact:
     wait_conditions:
+      # helm-controller v1 (Flux 2.x) reports InstallSucceeded/UpgradeSucceeded,
+      # not the v2beta1 ReconciliationSucceeded, so only Ready=True is checked.
       HelmRelease:
         type: Ready
         status: true
-        reason: ReconciliationSucceeded
       CustomResourceDefinition:
         type: Established
         status: true

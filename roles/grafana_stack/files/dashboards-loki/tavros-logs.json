@@ -1,0 +1,50 @@
+{
+ "annotations": {"list": []},
+ "editable": true,
+ "graphTooltip": 1,
+ "id": null,
+ "panels": [
+  {
+   "datasource": {"type": "loki", "uid": "loki"},
+   "fieldConfig": {"defaults": {"custom": {"drawStyle": "bars", "fillOpacity": 80, "stacking": {"mode": "normal"}}, "unit": "short"}, "overrides": []},
+   "gridPos": {"h": 7, "w": 24, "x": 0, "y": 0},
+   "id": 1,
+   "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+   "targets": [{"expr": "sum by (app) (count_over_time({namespace=~\"$namespace\", app=~\"$app\"} |~ \"$search\" [$__interval]))", "legendFormat": "{{app}}", "refId": "A"}],
+   "title": "Log volume by app",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {"type": "loki", "uid": "loki"},
+   "fieldConfig": {"defaults": {"custom": {"drawStyle": "bars", "fillOpacity": 80, "stacking": {"mode": "normal"}}, "color": {"mode": "fixed", "fixedColor": "red"}, "unit": "short"}, "overrides": []},
+   "gridPos": {"h": 6, "w": 24, "x": 0, "y": 7},
+   "id": 2,
+   "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+   "targets": [{"expr": "sum by (app) (count_over_time({namespace=~\"$namespace\", app=~\"$app\"} |~ \"(?i)\\\\b(error|exception|fatal)\\\\b\" [$__interval]))", "legendFormat": "{{app}}", "refId": "A"}],
+   "title": "Error lines by app",
+   "type": "timeseries"
+  },
+  {
+   "datasource": {"type": "loki", "uid": "loki"},
+   "gridPos": {"h": 16, "w": 24, "x": 0, "y": 13},
+   "id": 3,
+   "options": {"dedupStrategy": "none", "enableLogDetails": true, "prettifyLogMessage": false, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true},
+   "targets": [{"expr": "{namespace=~\"$namespace\", app=~\"$app\"} |~ \"$search\"", "refId": "A"}],
+   "title": "Logs",
+   "type": "logs"
+  }
+ ],
+ "refresh": "30s",
+ "schemaVersion": 39,
+ "tags": ["tavros", "logs"],
+ "templating": {
+  "list": [
+   {"name": "namespace", "label": "Namespace", "type": "query", "datasource": {"type": "loki", "uid": "loki"}, "query": {"label": "namespace", "refId": "LokiVariableQueryEditor-VariableQuery", "stream": "", "type": 1}, "includeAll": true, "multi": true, "current": {"selected": true, "text": "All", "value": "$__all"}, "allValue": ".+", "refresh": 2, "sort": 1},
+   {"name": "app", "label": "App", "type": "query", "datasource": {"type": "loki", "uid": "loki"}, "query": {"label": "app", "refId": "LokiVariableQueryEditor-VariableQuery", "stream": "{namespace=~\"$namespace\"}", "type": 1}, "includeAll": true, "multi": true, "current": {"selected": true, "text": "All", "value": "$__all"}, "allValue": ".*", "refresh": 2, "sort": 1},
+   {"name": "search", "label": "Search (regex)", "type": "textbox", "current": {"text": "", "value": ""}, "query": ""}
+  ]
+ },
+ "time": {"from": "now-1h", "to": "now"},
+ "title": "Tavros Logs",
+ "uid": "tavros-logs"
+}
