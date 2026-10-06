@@ -10,7 +10,7 @@ pipeline:
 - Flux v2 (bootstrapped by `fluxtoolkit`, synced by `fluxtoolkit_sync`), which
   today continues reconciling those rendered manifests from Gitea.
 
-In this POC, Helmfile release definitions under `helmfile.d/` are the single
+In this POC, Helmfile release definitions under `helmfile/` are the single
 source of truth for every platform component. There is no `HelmRelease` /
 `HelmRepository` / Flux `Kustomization` CRD anywhere here, and `fluxtoolkit` /
 `fluxtoolkit_sync` were not ported.
@@ -18,7 +18,7 @@ source of truth for every platform component. There is no `HelmRelease` /
 ## Architecture
 
 ```
-   dev            Gitea "platform-manifests" repo (this helmfile.d/ tree)
+   dev            Gitea "platform-manifests" repo (this helmfile/ tree)
     |  git push          |
     v                    v
   PR opened  ----->  Gitea webhook  ----->  Jenkins job
@@ -43,7 +43,7 @@ source of truth for every platform component. There is no `HelmRelease` /
 ### Layout
 
 ```
-helmfile.d/
+helmfile/
   helmfile.yaml               # entrypoint: environments:, repositories:, helmfiles: includes
   environments/
     default.yaml              # mirrors playbooks/provision_playbook/default_vars.yaml
@@ -240,7 +240,7 @@ helm plugin install https://github.com/databus23/helm-diff --verify=false
 Then, from this directory:
 
 ```sh
-cd helmfile.d
+cd helmfile
 
 # add/verify the chart repos declared in helmfile.yaml
 helmfile repos
