@@ -1,19 +1,5 @@
 ---
-# Tavros platform - Helmfile GitOps POC
-#
-# This is the single entrypoint. It replaces:
-#   - the Ansible roles under roles/* that Jinja2-templated Helm values and
-#     raw manifests and applied them once via ms3_inc.tavros.kube/kustomize
-#   - Flux v2 (fluxtoolkit/fluxtoolkit_sync), which continued reconciling the
-#     rendered manifests committed to Gitea
-#
-# with one declarative tool: every release below is Helmfile's source of
-# truth, and the intended day-2 loop is:
-#   push to the Gitea platform-manifests repo
-#     -> Gitea webhook (roles/jenkins/tasks/gitea_setup.yaml) triggers Jenkins
-#     -> `helmfile diff` on PR, `helmfile apply` on merge to main
-# See README.md for the full architecture writeup, what's ported vs. out of
-# scope, and a sample Jenkins pipeline stage (examples/Jenkinsfile.stage).
+# Tavros platform entrypoint. See README.md for the architecture.
 
 environments:
   default:
@@ -32,8 +18,7 @@ repositories:
   - name: jetstack
     url: https://charts.jetstack.io
   - name: sealed-secrets
-    # the bitnami-labs.github.io Pages URL used in most docs/tutorials 404s
-    # now; bitnami.github.io is the one that's actually live.
+    # the bitnami-labs.github.io URL cited in most docs is dead; this one is live.
     url: https://bitnami.github.io/sealed-secrets
   - name: kuma
     url: https://kumahq.github.io/charts
@@ -44,11 +29,8 @@ repositories:
   - name: sonatype
     url: https://sonatype.github.io/helm3-charts/
 
-# Every nested state file below needs `inherits` to see this file's
-# `environments:` (so .Environment.Values works inside releases/*.yaml and
-# values/*.yaml.gotmpl) and `repositories:` (so `chart: <repo>/<name>`
-# resolves) - Helmfile does not inherit either into `helmfiles:` includes by
-# default.
+# order matters: cert-manager and keycloak must precede releases that depend on them (see each release file).
+# `inherits` is required on every entry - helmfiles: includes don't inherit environments:/repositories: by default.
 helmfiles:
   - path: releases/namespaces.yaml
     inherits: ["environments", "repositories"]

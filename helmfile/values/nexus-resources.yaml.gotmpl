@@ -1,14 +1,4 @@
-{{- /*
-  Ports roles/nexus/files/{pvc-deploy,configmap-properties,
-  service-container-registry}.yaml and templates/{ingress,ingress-buildtools,
-  keycloakclient,kongplugin-oidc,secret-keycloak-config(+keycloak-config)}.j2.
-
-  NOT ported (explicitly out of scope): roles/nexus/tasks/configure-auth.yaml
-  and create-repositories.yaml - the imperative Nexus REST API calls that
-  configure the Keycloak realm role mapping and create repositories. Those
-  need a new home (a Jenkins post-apply job hitting the Nexus API, a Nexus
-  Terraform provider, etc.) - not attempted here.
-*/ -}}
+{{- /* repo/user creation (roles/nexus/tasks/configure-auth.yaml, create-repositories.yaml) is not ported */ -}}
 {{- $cfqdn := .Environment.Values.cluster_fqdn }}
 {{- $nexus := .Environment.Values.nexus }}
 {{- $kong := .Environment.Values.kong }}

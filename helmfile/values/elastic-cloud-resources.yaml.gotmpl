@@ -1,16 +1,4 @@
-{{- /*
-  Ports roles/elastic_cloud/templates/{elasticsearch,kibana,ingress,
-  keycloakclient,secret-eck-license,secret-init-scripts(+jaeger-init,
-  lifecycle-policies-init),job-init-runner}.j2 as .Values.manifests, and the
-  static Beats/metrics manifests as .Values.manifestFiles (vendored verbatim
-  under charts/raw-manifests/files/elastic-cloud/ - see that chart's
-  templates/manifests.yaml for why).
-
-  NOT ported (explicitly out of scope): roles/elastic_cloud/tasks/
-  config_kibana.yaml (imperative Kibana saved-objects import via
-  kibana-objects.ndjson) and the "Add RBAC Role Mapping for Keycloak" /
-  "Create Keycloak elastic-cloud Client Roles" API calls in tasks/main.yaml.
-*/ -}}
+{{- /* Kibana saved-objects import (roles/elastic_cloud/tasks/config_kibana.yaml) is not ported */ -}}
 {{- $cfqdn := .Environment.Values.cluster_fqdn }}
 {{- $ec := .Environment.Values.elastic_cloud }}
 {{- $kong := .Environment.Values.kong }}

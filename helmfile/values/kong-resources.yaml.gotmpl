@@ -1,11 +1,4 @@
-{{- /*
-  Ports the per-Kong-instance raw manifests: secret-pg-creds.j2, ingress.j2,
-  secret-ee-admin-creds.j2, secret-ee-admin-gui-auth.j2 (which embeds
-  oidc-config-keycloak.j2), secret-ee-admin-gui-session.j2, and
-  hybrid-certs.j2. Looks the instance up by .Release.Labels.instance in
-  .Environment.Values.kong.instances - see the note in
-  releases/kong.yaml.gotmpl for why this isn't passed via .Values directly.
-*/ -}}
+{{- /* looks the instance up by label - see releases/kong.yaml.gotmpl */ -}}
 {{- $instName := .Release.Labels.instance }}
 {{- $i := dict }}
 {{- range .Environment.Values.kong.instances }}
@@ -147,9 +140,7 @@ manifests:
       namespace: kong
     type: Opaque
     stringData:
-      # NB: source template generates one random secret shared by both
-      # cookie_name conf's "secret" field at Ansible render time; here each
-      # placeholder must be replaced with a real random value before apply.
+      # both "secret" fields below must be the same real random value (shared cookie secret)
       admin_gui_session_conf: |-
         {"cookie_name":"admin_session","cookie_samesite":"off","secret":"CHANGEME-{{ $i.name }}-admin-gui-session-secret","cookie_secure":true,"storage":"kong"}
       portal_session_conf: |-

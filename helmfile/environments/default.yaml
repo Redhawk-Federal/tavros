@@ -1,18 +1,5 @@
-# Default environment values for the Helmfile GitOps POC.
-#
-# This mirrors playbooks/provision_playbook/default_vars.yaml (the shape the
-# Ansible role variables take today) so the same topology - one cluster, a
-# sandbox + prod Kong instance, a sandbox + prod Kuma mesh, dev/test/prod
-# namespaces, sandbox + prod Keycloak realms - can be reconstructed as
-# Helmfile `environments:` values instead of Ansible host/group vars.
-#
-# In the Ansible world, secrets (passwords, client secrets) are generated
-# on first run with `lookup('password', '/dev/null')` and then sealed with
-# kubeseal for Flux to apply. There is no kubeseal/SealedSecrets controller
-# in this POC's day-2 loop (see README "Secrets" section), so every secret
-# value below is an obvious CHANGEME placeholder. Before `helmfile apply`
-# against a real cluster, replace these with values injected from a secrets
-# manager / SOPS-encrypted values file - do not commit real secrets here.
+# CHANGEME-* values are placeholders. Replace with a secrets manager or
+# SOPS-encrypted values file before running `helmfile apply` for real.
 
 cluster_fqdn: "tavros.example.com"
 cluster_admin_email: "admin@tavros.example.com"
@@ -97,9 +84,7 @@ cert_manager:
   enabled: true
 
 sealed_secrets:
-  # Not used by any release in this cluster now that kubeseal/Flux is gone -
-  # kept installed only so a future pass can reintroduce sealed, at-rest
-  # secrets management without re-deriving the chart choice. See README.
+  # installed but unused: no release currently seals secrets with it
   enabled: true
 
 gitea:

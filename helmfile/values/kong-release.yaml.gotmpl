@@ -1,15 +1,4 @@
-{{- /*
-  Ports roles/kong/templates/release.j2 (the Kong Helm chart values) 1:1.
-  Instantiated once per entry in .Environment.Values.kong.instances (twice,
-  -cp/-dp, when that instance is hybrid) - see releases/kong.yaml, which
-  tags each generated release with labels.instance (the Kong instance name)
-  and labels.role ("control_plane" / "data_plane" / "none"). This file looks
-  the instance back up by name in .Environment.Values.kong.instances rather
-  than receiving it directly via .Values, since Helmfile does not merge an
-  earlier inline `values:` list entry into `.Values` for a later .gotmpl
-  entry in that same list (see the note in releases/kong.yaml.gotmpl).
-  https://github.com/Kong/charts/tree/kong-2.52.0/charts/kong
-*/ -}}
+{{- /* looks the instance up by label - see releases/kong.yaml.gotmpl */ -}}
 {{- $instName := .Release.Labels.instance }}
 {{- $role := .Release.Labels.role }}
 {{- $i := dict }}

@@ -1,13 +1,5 @@
 ---
-# Ports roles/gitea (Helm chart install only - not keycloak_sso.yaml, the
-# imperative Gitea API calls; see README). Chart repo/name/version from
-# roles/gitea/templates/release.j2 (Flux HelmRelease): gitea v2.2.4 from
-# https://dl.gitea.io/charts/.
-#
-# This IS the Gitea instance the day-2 Helmfile loop pushes rendered
-# manifests to and that Jenkins' webhook listens on (see README + the
-# platform-manifests repo convention) - it is provisioned the same way as
-# every other component here, nothing circular about it.
+# gitea v2.2.4 (https://dl.gitea.io/charts/)
 releases:
   - name: gitea
     namespace: gitea
@@ -22,8 +14,6 @@ releases:
   - name: gitea-resources
     namespace: gitea
     chart: ../charts/raw-manifests
-    # NB: also implicitly needs keycloak/keycloak-resources (realm) - see
-    # the "Known gaps" note in README re: `needs` not spanning separate
-    # `helmfiles:` includes; ordering relies on keycloak.yaml coming first.
+    # also needs keycloak-resources (realm); enforced by include order in helmfile.yaml.
     values:
       - ../values/gitea-resources.yaml.gotmpl

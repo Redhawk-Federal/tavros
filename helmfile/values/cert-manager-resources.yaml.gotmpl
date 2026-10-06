@@ -1,8 +1,3 @@
-{{- /*
-  Ports roles/cert_manager/files/tavros-ca.yaml (self-signed root CA used
-  internally) and roles/cert_manager/templates/tavros-clusterissuer.j2 (the
-  public ACME ClusterIssuer, one http01 solver selector per Kong instance).
-*/ -}}
 {{- $cfqdn := .Environment.Values.cluster_fqdn }}
 {{- $kong := .Environment.Values.kong }}
 manifests:
@@ -47,9 +42,7 @@ manifests:
       namespace: cert-manager
     spec:
       acme:
-        # NB: the Ansible template switches to the LE staging server when the
-        # 'test-run' tag is set. Point this at the staging ACME server
-        # yourself (e.g. via an environment override) for non-prod clusters.
+        # use the LE staging server (not this URL) for non-prod clusters
         email: {{ .Environment.Values.cluster_admin_email }}
         server: https://acme-v02.api.letsencrypt.org/directory
         preferredChain: "ISRG Root X1"

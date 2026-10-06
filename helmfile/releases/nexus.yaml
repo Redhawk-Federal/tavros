@@ -1,9 +1,5 @@
 ---
-# Ports roles/nexus (Helm chart install only - not configure-auth.yaml /
-# create-repositories.yaml, which call the Nexus REST API; see README).
-# Chart repo/name/version from roles/nexus/files/release.yaml (Flux
-# HelmRelease): nexus-repository-manager v64.2.0 from
-# https://sonatype.github.io/helm3-charts/.
+# nexus-repository-manager v64.2.0 (https://sonatype.github.io/helm3-charts/)
 releases:
   - name: nexus
     namespace: nexus
@@ -18,9 +14,6 @@ releases:
   - name: nexus-resources
     namespace: nexus
     chart: ../charts/raw-manifests
-    # NB: also implicitly needs keycloak/keycloak-resources (the realm the
-    # KeycloakClient below belongs to) - see the "Known gaps" note in
-    # README re: `needs` not spanning separate `helmfiles:` includes;
-    # ordering here relies on keycloak.yaml coming first in helmfile.yaml.
+    # also needs keycloak-resources (realm); enforced by include order in helmfile.yaml.
     values:
       - ../values/nexus-resources.yaml.gotmpl

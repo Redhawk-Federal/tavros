@@ -1,8 +1,3 @@
-{{- /*
-  Ports roles/jaeger/files/{jaeger,cronjob-spark-dependencies}.yaml and
-  templates/{ingress,keycloakclient,kongplugin-oidc,secret-es-creds,
-  secret-es-http-certs}.j2.
-*/ -}}
 {{- $cfqdn := .Environment.Values.cluster_fqdn }}
 {{- $jaeger := .Environment.Values.jaeger }}
 {{- $kong := .Environment.Values.kong }}
@@ -208,14 +203,8 @@ manifests:
       ES_USERNAME: jaeger
       ES_PASSWORD: "{{ $jaeger.es.password }}"
 
-  # NB: roles/jaeger/tasks/main.yaml reads the ca.crt out of the live
-  # tavros-es-http-certs-public Secret (created by the ECK operator) and
-  # re-writes it here at apply time - a live-cluster read Ansible can do but
-  # a Helmfile values template (rendered offline) cannot. Options for a
-  # real deployment: a Helmfile `hooks.presync` that `kubectl get secret
-  # tavros-es-http-certs-public -o jsonpath=...` and feeds it in via
-  # `helmfile ... --set`, or an External Secret / Reflector that mirrors it
-  # automatically. Left as a placeholder here.
+  # ca.crt must come from the live tavros-es-http-certs-public Secret (ECK-created) -
+  # a values template can't read the cluster; use a presync hook or an External Secret.
   - apiVersion: v1
     kind: Secret
     metadata:

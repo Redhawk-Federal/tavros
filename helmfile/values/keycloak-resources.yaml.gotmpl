@@ -1,15 +1,3 @@
-{{- /*
-  Ports roles/keycloak/files/keycloak.yaml, clusterrolebinding-oidc-cluster-admin.yaml,
-  and templates/{ingress,secret-keycloak-db,keycloakclient-kubernetes,keycloakrealm,
-  keycloakuser-admin}.j2.
-
-  NOT ported: the legacy keycloak-operator's realm/client *bootstrap API calls*
-  do not exist in this role to begin with (it's all declarative CRs already) -
-  what IS explicitly out of scope per the task brief is roles/keycloak's
-  sibling imperative work done by OTHER roles against this Keycloak instance
-  (roles/gitea/tasks/keycloak_sso.yaml, roles/nexus's keycloak realm-role
-  wiring, etc.) - those remain plain Ansible/API work for a future pass.
-*/ -}}
 {{- $cfqdn := .Environment.Values.cluster_fqdn }}
 {{- $adminEmail := .Environment.Values.cluster_admin_email }}
 {{- $kc := .Environment.Values.kubernetes_cluster.keycloak }}
@@ -177,10 +165,6 @@ manifests:
             - "realm-admin"
           kubernetes:
             - "admin"
-          # NB: roles/nexus, roles/jaeger and roles/elastic_cloud each
-          # ansible `blockinfile`-patch additional clientRoles entries
-          # (nexus: admin, jaeger: user, elastic-cloud: admin) into this same
-          # KeycloakUser after their own role runs. That cross-release patch
-          # has no Helmfile equivalent here - if you need it, add the roles
-          # for the clients you enable directly below.
+          # nexus/jaeger/elastic-cloud each need an additional clientRole here
+          # (admin/user/admin) when enabled - add them directly, no cross-release patch exists.
 {{- end }}

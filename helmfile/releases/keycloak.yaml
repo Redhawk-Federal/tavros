@@ -1,22 +1,7 @@
 ---
-# Ports roles/keycloak (Helm/operator install only - NOT the realm/client
-# bootstrap, which this role doesn't do via API calls anyway; it's all
-# declarative CRs already, see values/keycloak-resources.yaml.gotmpl).
-#
-# Judgment call: roles/keycloak does NOT install a Helm chart today - it
-# kustomize-applies the archived/EOL legacy keycloak-operator v19.0.3's CRDs
-# + operator.yaml + role/role_binding/service_account directly from GitHub
-# (roles/keycloak/files/operator/kustomization.yaml). There is no maintained
-# Helm chart for that specific legacy operator (the *current* Keycloak
-# Operator is a different, unrelated project using keycloak.org/v2alpha1).
-# For this POC we keep the exact same upstream manifests and apply them via
-# a Helmfile `hooks.presync` kubectl-apply, rather than hand-vendoring
-# several hundred lines of CRD/RBAC YAML into this repo. This is the one
-# place in this port that still shells out to kubectl instead of letting
-# Helm manage the resources - flagged here and in the README as a follow-up
-# (either vendor+pin the manifests as local chart files, or replace the
-# legacy operator entirely with the modern Keycloak Operator / its Helm
-# chart, which would also unblock dropping the v1alpha1 CRDs).
+# keycloak-operator v19.0.3 has no Helm chart (legacy, archived upstream;
+# the current Keycloak Operator is an unrelated v2alpha1 project) - applied
+# via presync kubectl-apply instead of Helm managing it directly.
 releases:
   - name: keycloak-operator
     namespace: keycloak
@@ -54,11 +39,7 @@ releases:
   - name: keycloak-resources
     namespace: keycloak
     chart: ../charts/raw-manifests
-    # NB: also implicitly needs cert-manager/cert-manager-resources (for the
-    # "tavros" ClusterIssuer the Ingress references) - Helmfile can't express
-    # `needs` across separate `helmfiles:` includes (see README "Known
-    # gaps"), so this is ordered only by cert-manager.yaml coming first in
-    # helmfile.yaml's `helmfiles:` list.
+    # also needs cert-manager-resources (ClusterIssuer); enforced only by include order in helmfile.yaml.
     needs:
       - keycloak/keycloak-operator
     values:
