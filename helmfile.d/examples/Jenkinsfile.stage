@@ -1,15 +1,15 @@
-// Sample Jenkins pipeline stages showing the intended day-2 GitOps loop for
-// this Helmfile port: push to the Gitea platform-manifests repo (this repo,
-// or wherever helmfile.d/ ends up living) -> Gitea webhook
+// Sample single-stage Jenkins pipeline showing the intended day-2 GitOps
+// loop for this Helmfile port: push to the Gitea platform-manifests repo
+// (this repo, or wherever helmfile.d/ ends up living) -> Gitea webhook
 // (roles/jenkins/tasks/gitea_setup.yaml already wires a webhook per-repo;
 // point one at this repo too) -> Jenkins runs `helmfile diff` on PR and
-// `helmfile apply` on merge to main.
+// `helmfile apply` on merge to main, all within one stage.
 //
 // This is illustrative only - NOT wired into .jenkins/Jenkinsfile (that
 // pipeline drives kOps/Terraform cluster provisioning, a separate concern
-// out of scope for this POC). Copy/adapt these stages into whatever
-// pipeline watches this repo once the Gitea webhook -> Jenkins job exists.
-// Follows the same `container('tavros-tools')` convention as the real
+// out of scope for this POC). Copy/adapt this stage into whatever pipeline
+// watches this repo once the Gitea webhook -> Jenkins job exists. Follows
+// the same `container('tavros-tools')` convention as the real
 // .jenkins/Jenkinsfile so it can reuse that pod template/tool image.
 
 pipeline {
@@ -20,28 +20,19 @@ pipeline {
     }
   }
   stages {
-    stage('helmfile lint') {
+    stage('helmfile') {
       steps {
         container('tavros-tools') {
           sh 'helmfile --file helmfile.d/helmfile.yaml --environment prod lint'
-        }
-      }
-    }
-    stage('helmfile diff') {
-      when { changeRequest() }
-      steps {
-        container('tavros-tools') {
-          sh 'helmfile --file helmfile.d/helmfile.yaml --environment prod diff --detailed-exitcode || true'
-          // post the diff as a PR comment via the Gitea API here, same
-          // pattern roles/jenkins/tasks/gitea_setup.yaml uses for webhooks.
-        }
-      }
-    }
-    stage('helmfile apply') {
-      when { branch 'main' }
-      steps {
-        container('tavros-tools') {
-          sh 'helmfile --file helmfile.d/helmfile.yaml --environment prod apply --skip-diff-on-install'
+          script {
+            if (env.CHANGE_ID) {
+              sh 'helmfile --file helmfile.d/helmfile.yaml --environment prod diff --detailed-exitcode || true'
+              // post the diff as a PR comment via the Gitea API here, same
+              // pattern roles/jenkins/tasks/gitea_setup.yaml uses for webhooks.
+            } else if (env.BRANCH_NAME == 'main') {
+              sh 'helmfile --file helmfile.d/helmfile.yaml --environment prod apply --skip-diff-on-install'
+            }
+          }
         }
       }
     }

@@ -34,11 +34,11 @@ source of truth for every platform component. There is no `HelmRelease` /
   Gitea as source, not as rendered output -> the existing Gitea -> Jenkins
   webhook (`roles/jenkins/tasks/gitea_setup.yaml`, unmodified) triggers a
   Jenkins job that runs `helmfile diff` on every PR and `helmfile apply` on
-  merge to `main`. Helmfile (via `helm` + `helm-diff`) is the only thing that
-  ever talks to the cluster; nothing reconciles in a loop in-cluster anymore.
-  See `examples/Jenkinsfile.stage` for a sketch of that job (illustrative
-  only - the real `.jenkins/Jenkinsfile` was not touched; it drives cluster
-  provisioning, a separate concern).
+  merge to `main`, all within a single pipeline stage. Helmfile (via `helm` +
+  `helm-diff`) is the only thing that ever talks to the cluster; nothing
+  reconciles in a loop in-cluster anymore. See `examples/Jenkinsfile.stage`
+  for a sketch of that job (illustrative only - the real `.jenkins/Jenkinsfile`
+  was not touched; it drives cluster provisioning, a separate concern).
 
 ### Layout
 
