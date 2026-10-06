@@ -1,0 +1,206 @@
+{{- /*
+  Ports the per-Kong-instance raw manifests: secret-pg-creds.j2, ingress.j2,
+  secret-ee-admin-creds.j2, secret-ee-admin-gui-auth.j2 (which embeds
+  oidc-config-keycloak.j2), secret-ee-admin-gui-session.j2, and
+  hybrid-certs.j2. Looks the instance up by .Release.Labels.instance in
+  .Environment.Values.kong.instances - see the note in
+  releases/kong.yaml.gotmpl for why this isn't passed via .Values directly.
+*/ -}}
+{{- $instName := .Release.Labels.instance }}
+{{- $i := dict }}
+{{- range .Environment.Values.kong.instances }}
+  {{- if eq .name $instName }}
+    {{- $i = . }}
+  {{- end }}
+{{- end }}
+{{- $cfqdn := .Environment.Values.cluster_fqdn }}
+{{- $kong := .Environment.Values.kong }}
+{{- $isDefaultIngress := eq $i.ingress_class $kong.default_ingress_class }}
+manifests:
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: tavros-{{ $i.name }}-pg-creds
+      namespace: kong
+    type: Opaque
+    stringData:
+      pg_database: {{ $i.name }}
+      pg_user: {{ $i.name }}
+      pg_password: "{{ $i.pg.password }}"
+
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: tavros-{{ $i.name }}
+      namespace: kong
+      annotations:
+        konghq.com/strip-path: "true"
+        konghq.com/protocols: https
+        kubernetes.io/ingress.class: {{ $i.ingress_class }}
+        cert-manager.io/cluster-issuer: tavros
+        konghq.com/https-redirect-status-code: "302"
+    spec:
+      tls:
+        - hosts:
+            {{- if $i.ee.enabled }}
+            - "admin-api.{{ $i.name }}.{{ $cfqdn }}"
+            - "admin.{{ $i.name }}.{{ $cfqdn }}"
+            - "dev-portal-api{{ if not $isDefaultIngress }}.{{ $i.ingress_class }}{{ end }}.{{ $cfqdn }}"
+            - "dev-portal{{ if not $isDefaultIngress }}.{{ $i.ingress_class }}{{ end }}.{{ $cfqdn }}"
+            {{- end }}
+            - "apps{{ if not $isDefaultIngress }}.{{ $i.ingress_class }}{{ end }}.{{ $cfqdn }}"
+          secretName: {{ $i.name }}-ingress-certs
+      rules:
+        {{- if $i.ee.enabled }}
+        - host: "admin-api.{{ $i.name }}.{{ $cfqdn }}"
+          http:
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+                backend:
+                  service:
+                    name: kong-tavros-{{ $i.name }}{{ if $i.hybrid }}-cp{{ end }}-kong-admin
+                    port:
+                      number: 8001
+        - host: "admin.{{ $i.name }}.{{ $cfqdn }}"
+          http:
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+                backend:
+                  service:
+                    name: kong-tavros-{{ $i.name }}{{ if $i.hybrid }}-cp{{ end }}-kong-manager
+                    port:
+                      number: 8002
+        - host: "dev-portal{{ if not $isDefaultIngress }}.{{ $i.ingress_class }}{{ end }}.{{ $cfqdn }}"
+          http:
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+                backend:
+                  service:
+                    name: kong-tavros-{{ $i.name }}{{ if $i.hybrid }}-cp{{ end }}-kong-portal
+                    port:
+                      number: 8003
+        - host: "dev-portal-api{{ if not $isDefaultIngress }}.{{ $i.ingress_class }}{{ end }}.{{ $cfqdn }}"
+          http:
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+                backend:
+                  service:
+                    name: kong-tavros-{{ $i.name }}{{ if $i.hybrid }}-cp{{ end }}-kong-portalapi
+                    port:
+                      number: 8004
+        {{- end }}
+        - host: "apps{{ if not $isDefaultIngress }}.{{ $i.ingress_class }}{{ end }}.{{ $cfqdn }}"
+          http:
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+                backend:
+                  service:
+                    name: kong-tavros-{{ $i.name }}{{ if $i.hybrid }}-dp{{ end }}-kong-proxy
+                    port:
+                      number: 80
+
+  {{- if $i.ee.enabled }}
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: tavros-{{ $i.name }}-ee-admin-creds
+      namespace: kong
+    type: Opaque
+    stringData:
+      password: "{{ $i.ee.admin_password }}"
+
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: tavros-{{ $i.name }}-ee-admin-gui-auth
+      namespace: kong
+    type: Opaque
+    stringData:
+      admin_gui_auth_conf: |-
+        {
+          "issuer":"https://auth.{{ $cfqdn }}/auth/realms/{{ $i.ee.keycloak.realm }}",
+          "admin_claim": "email",
+          "client_id":["{{ $i.name }}"],
+          "client_secret":["{{ $i.ee.keycloak.client_secret }}"],
+          "authenticated_groups_claim": ["groups"],
+          "ssl_verify":false,
+          "leeway":1000,
+          "redirect_uri":["https://admin.{{ $i.name }}.{{ $cfqdn }}"],
+          "login_redirect_uri":["https://admin.{{ $i.name }}.{{ $cfqdn }}"],
+          "logout_methods":["GET", "DELETE"],
+          "logout_query_arg":"logout",
+          "logout_redirect_uri":["https://admin.{{ $i.name }}.{{ $cfqdn }}"],
+          "scopes":["openid","profile","email","offline_access"],
+          "auth_methods": ["authorization_code"],
+          "admin_auto_create_rbac_token_disabled": false
+        }
+
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: tavros-{{ $i.name }}-ee-admin-gui-session
+      namespace: kong
+    type: Opaque
+    stringData:
+      # NB: source template generates one random secret shared by both
+      # cookie_name conf's "secret" field at Ansible render time; here each
+      # placeholder must be replaced with a real random value before apply.
+      admin_gui_session_conf: |-
+        {"cookie_name":"admin_session","cookie_samesite":"off","secret":"CHANGEME-{{ $i.name }}-admin-gui-session-secret","cookie_secure":true,"storage":"kong"}
+      portal_session_conf: |-
+        {"cookie_name":"portal_session","cookie_samesite":"off","secret":"CHANGEME-{{ $i.name }}-portal-session-secret","cookie_secure":true,"storage":"kong"}
+  {{- end }}
+
+  {{- if $i.hybrid }}
+  - apiVersion: cert-manager.io/v1
+    kind: Certificate
+    metadata:
+      name: {{ $i.name }}-cp
+      namespace: kong
+    spec:
+      commonName: {{ $i.name }}-cp
+      secretName: {{ $i.name }}-cp-cert
+      privateKey:
+        algorithm: ECDSA
+        size: 256
+      usages:
+        - digital signature
+        - key encipherment
+        - key agreement
+        - server auth
+      dnsNames:
+        - kong-tavros-{{ $i.name }}-cp-kong-cluster.kong.svc.cluster.local
+        - kong-tavros-{{ $i.name }}-cp-kong-clustertelemetry.kong.svc.cluster.local
+      issuerRef:
+        name: tavros-ca
+        kind: ClusterIssuer
+        group: cert-manager.io
+
+  - apiVersion: cert-manager.io/v1
+    kind: Certificate
+    metadata:
+      name: {{ $i.name }}-dp
+      namespace: kong
+    spec:
+      commonName: {{ $i.name }}-dp
+      secretName: {{ $i.name }}-dp-cert
+      privateKey:
+        algorithm: ECDSA
+        size: 256
+      usages:
+        - digital signature
+        - key encipherment
+        - key agreement
+        - client auth
+      dnsNames:
+        - kong-tavros-{{ $i.name }}-dp-kong-proxy.kong.svc.cluster.local
+      issuerRef:
+        name: tavros-ca
+        kind: ClusterIssuer
+        group: cert-manager.io
+  {{- end }}

@@ -1,0 +1,11 @@
+apiVersion: v2
+name: raw-manifests
+description: >-
+  Generic local chart that emits whatever raw Kubernetes manifests are passed
+  in via .Values.manifests. Used by every Helmfile release in this repo that
+  needs to apply plain YAML (namespaces, ClusterIssuers, CRs, Secrets, etc.)
+  instead of an upstream Helm chart, so Helmfile stays the single tool that
+  reconciles the cluster (replacing both Ansible's templating and Flux's
+  Kustomization controller).
+type: application
+version: 0.1.0

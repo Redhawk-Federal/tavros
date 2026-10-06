@@ -1,0 +1,65 @@
+---
+# Ports roles/elastic_cloud (operator + Beats install only - not
+# tasks/config_kibana.yaml, which imports kibana-objects.ndjson via the
+# Kibana saved-objects API).
+#
+# Judgment call: same pattern as keycloak - roles/elastic_cloud installs ECK
+# straight from https://download.elastic.co/downloads/eck/2.5.0/{crds,operator}.yaml
+# (no Helm chart reference), and kube-state-metrics from five raw
+# kubernetes/kube-state-metrics v2.7.0 example manifests. Elastic DOES publish
+# an official `eck-operator` Helm chart (https://helm.elastic.co) that would
+# be a cleaner long-term fit than this presync hook - left as a follow-up so
+# this port doesn't silently drift from the pinned 2.5.0 operator behavior.
+releases:
+  - name: eck-operator
+    namespace: elastic-system
+    createNamespace: true
+    chart: ../charts/raw-manifests
+    values:
+      - manifests: []
+    hooks:
+      - events: ["presync"]
+        showlogs: true
+        command: "kubectl"
+        args:
+          - "apply"
+          - "-f"
+          - "https://download.elastic.co/downloads/eck/2.5.0/crds.yaml"
+          - "-f"
+          - "https://download.elastic.co/downloads/eck/2.5.0/operator.yaml"
+
+  - name: kube-state-metrics
+    namespace: elastic-system
+    chart: ../charts/raw-manifests
+    values:
+      - manifests: []
+    hooks:
+      - events: ["presync"]
+        showlogs: true
+        command: "kubectl"
+        args:
+          - "apply"
+          - "-f"
+          - "https://raw.githubusercontent.com/kubernetes/kube-state-metrics/v2.7.0/examples/standard/cluster-role.yaml"
+          - "-f"
+          - "https://raw.githubusercontent.com/kubernetes/kube-state-metrics/v2.7.0/examples/standard/service-account.yaml"
+          - "-f"
+          - "https://raw.githubusercontent.com/kubernetes/kube-state-metrics/v2.7.0/examples/standard/cluster-role-binding.yaml"
+          - "-n"
+          - "elastic-system"
+          - "-f"
+          - "https://raw.githubusercontent.com/kubernetes/kube-state-metrics/v2.7.0/examples/standard/service.yaml"
+          - "-f"
+          - "https://raw.githubusercontent.com/kubernetes/kube-state-metrics/v2.7.0/examples/standard/deployment.yaml"
+
+  - name: elastic-cloud-resources
+    namespace: elastic-system
+    chart: ../charts/raw-manifests
+    # NB: also implicitly needs keycloak/keycloak-resources when
+    # elastic_cloud.ee.enabled (the KeycloakClient's realm) - see the
+    # "Known gaps" note in README re: `needs` not spanning separate
+    # `helmfiles:` includes; ordering relies on keycloak.yaml coming first.
+    needs:
+      - elastic-system/eck-operator
+    values:
+      - ../values/elastic-cloud-resources.yaml.gotmpl

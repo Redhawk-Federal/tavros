@@ -1,0 +1,25 @@
+{{- /*
+  Ranges over .Values.manifests (a list of plain Kubernetes object maps) and
+  emits each one as its own YAML document. Every "raw manifest" release in
+  this repo (roles that today are kustomize/kubectl-applied YAML rather than
+  a Helm chart: namespace, cert-manager's ClusterIssuers, keycloak/jaeger/ECK
+  operator CRs, postgresql's StatefulSet, etc.) goes through this one chart so
+  Helmfile remains the single tool driving the cluster.
+*/ -}}
+{{- range .Values.manifests }}
+---
+{{ toYaml . }}
+{{- end }}
+{{- /*
+  Second input mode: .Values.manifestFiles is a list of paths (relative to
+  this chart's files/ directory) of upstream manifests that are vendored
+  verbatim rather than retyped as .Values.manifests maps - e.g. the Elastic
+  Beats DaemonSets/Deployments under files/elastic-cloud/, which are large,
+  static, and identical to what roles/elastic_cloud applies today. Each
+  file's contents are emitted as-is (they're already valid, possibly
+  multi-document, Kubernetes YAML).
+*/ -}}
+{{- range .Values.manifestFiles }}
+---
+{{ $.Files.Get (printf "files/%s" .) }}
+{{- end }}

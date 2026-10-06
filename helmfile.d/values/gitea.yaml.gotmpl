@@ -1,0 +1,39 @@
+{{- /*
+  Ports roles/gitea/templates/release.j2 1:1.
+  https://gitea.com/gitea/helm-chart/src/tag/v2.2.4/values.yaml
+*/ -}}
+{{- $v := .Environment.Values }}
+fullnameOverride: gitea
+gitea:
+  admin:
+    username: "gitea_admin"
+    password: "{{ $v.gitea.admin_password }}"
+    email: "{{ $v.cluster_admin_email }}"
+  config:
+    service:
+      # Disable registration, except via OpenID
+      DISABLE_REGISTRATION: false
+      ALLOW_ONLY_EXTERNAL_REGISTRATION: true
+    openid:
+      # Do not allow signin to local users via OpenID
+      ENABLE_OPENID_SIGNIN: false
+      # Do not allow creation of new users via OpenID
+      ENABLE_OPENID_SIGNUP: false
+    server:
+      ROOT_URL: "https://code.{{ $v.cluster_fqdn }}/"
+      SSH_DOMAIN: "code.{{ $v.cluster_fqdn }}"
+    database:
+      DB_TYPE: postgres
+      HOST: "tavros-postgresql.postgresql.svc.cluster.local:5432"
+      NAME: "gitea"
+      USER: "gitea"
+      PASSWD: "{{ $v.gitea.pg.password }}"
+    security:
+      PASSWORD_COMPLEXITY: "off"
+  database:
+    builtIn:
+      postgresql:
+        enabled: false
+memcached:
+  image:
+    tag: latest

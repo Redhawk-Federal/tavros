@@ -1,0 +1,186 @@
+{{- /*
+  Ports roles/keycloak/files/keycloak.yaml, clusterrolebinding-oidc-cluster-admin.yaml,
+  and templates/{ingress,secret-keycloak-db,keycloakclient-kubernetes,keycloakrealm,
+  keycloakuser-admin}.j2.
+
+  NOT ported: the legacy keycloak-operator's realm/client *bootstrap API calls*
+  do not exist in this role to begin with (it's all declarative CRs already) -
+  what IS explicitly out of scope per the task brief is roles/keycloak's
+  sibling imperative work done by OTHER roles against this Keycloak instance
+  (roles/gitea/tasks/keycloak_sso.yaml, roles/nexus's keycloak realm-role
+  wiring, etc.) - those remain plain Ansible/API work for a future pass.
+*/ -}}
+{{- $cfqdn := .Environment.Values.cluster_fqdn }}
+{{- $adminEmail := .Environment.Values.cluster_admin_email }}
+{{- $kc := .Environment.Values.kubernetes_cluster.keycloak }}
+manifests:
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: keycloak-db-secret
+      namespace: keycloak
+    type: Opaque
+    stringData:
+      POSTGRES_USERNAME: "keycloak"
+      POSTGRES_DATABASE: "keycloak"
+      POSTGRES_PASSWORD: "{{ .Environment.Values.keycloak.pg.password }}"
+      POSTGRES_HOST: "keycloak-postgresql"
+      POSTGRES_EXTERNAL_ADDRESS: "tavros-postgresql.postgresql.svc.cluster.local"
+      POSTGRES_EXTERNAL_PORT: "5432"
+      POSTGRES_SUPERUSER: "false"
+
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: tavros
+      namespace: keycloak
+      annotations:
+        cert-manager.io/cluster-issuer: tavros
+        kubernetes.io/ingress.class: {{ .Environment.Values.kong.default_ingress_class }}
+        konghq.com/strip-path: "true"
+        konghq.com/protocols: https
+        konghq.com/https-redirect-status-code: "302"
+    spec:
+      rules:
+        - host: auth.{{ $cfqdn }}
+          http:
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+                backend:
+                  service:
+                    name: keycloak-discovery
+                    port:
+                      number: 8080
+      tls:
+        - hosts:
+            - auth.{{ $cfqdn }}
+          secretName: auth-ingress-cert
+
+  - apiVersion: keycloak.org/v1alpha1
+    kind: Keycloak
+    metadata:
+      name: tavros
+      namespace: keycloak
+      labels:
+        app.tavros/component: auth
+    spec:
+      instances: 1
+      externalDatabase:
+        enabled: true
+      externalAccess:
+        enabled: false
+      podDisruptionBudget:
+        enabled: true
+
+  - apiVersion: keycloak.org/v1alpha1
+    kind: KeycloakClient
+    metadata:
+      name: kubernetes
+      namespace: keycloak
+      labels:
+        client: kubernetes
+    spec:
+      realmSelector:
+        matchLabels:
+          realm: {{ $kc.realm }}
+      client:
+        clientId: kubernetes
+        secret: "{{ $kc.client_secret }}"
+        protocol: openid-connect
+        rootUrl: http://localhost:8000
+        redirectUris:
+          - "http://localhost:8000"
+          - "http://localhost:18000"
+        directAccessGrantsEnabled: true
+        standardFlowEnabled: true
+        enabled: true
+        protocolMappers:
+          - name: roles
+            protocol: openid-connect
+            protocolMapper: "oidc-usermodel-client-role-mapper"
+            config:
+              id.token.claim: "true"
+              claim.name: "groups"
+              multivalued: "true"
+              userinfo.token.claim: "false"
+              jsonType.label: string
+              access.token.claim: "true"
+              usermodel.clientRoleMapping.clientId: kubernetes
+      roles:
+        - name: "admin"
+        - name: "test"
+        - name: "dev"
+        - name: "prod"
+
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: oidc-cluster-admin
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: cluster-admin
+    subjects:
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: "oidc:admin"
+
+{{- range $realm := .Environment.Values.keycloak.realms }}
+
+  - apiVersion: keycloak.org/v1alpha1
+    kind: KeycloakRealm
+    metadata:
+      name: tavros-{{ $realm.name }}
+      namespace: keycloak
+      labels:
+        realm: {{ $realm.name }}
+    spec:
+      instanceSelector:
+        matchLabels:
+          app.tavros/component: auth
+      realm:
+        id: {{ $realm.name }}
+        realm: {{ $realm.name }}
+        enabled: true
+        displayName: {{ $realm.name }}
+
+  - apiVersion: keycloak.org/v1alpha1
+    kind: KeycloakUser
+    metadata:
+      name: tavros-{{ $realm.name }}-admin
+      namespace: keycloak
+      labels:
+        app: sso
+    spec:
+      realmSelector:
+        matchLabels:
+          realm: {{ $realm.name }}
+      user:
+        username: {{ $adminEmail }}
+        firstName: Tavros
+        lastName: Admin
+        email: {{ $adminEmail }}
+        enabled: true
+        emailVerified: true
+        credentials:
+          - type: "password"
+            value: "{{ $realm.admin_password }}"
+            temporary: false
+        realmRoles:
+          - "offline_access"
+        clientRoles:
+          account:
+            - "manage-account"
+            - "view-profile"
+          realm-management:
+            - "realm-admin"
+          kubernetes:
+            - "admin"
+          # NB: roles/nexus, roles/jaeger and roles/elastic_cloud each
+          # ansible `blockinfile`-patch additional clientRoles entries
+          # (nexus: admin, jaeger: user, elastic-cloud: admin) into this same
+          # KeycloakUser after their own role runs. That cross-release patch
+          # has no Helmfile equivalent here - if you need it, add the roles
+          # for the clients you enable directly below.
+{{- end }}

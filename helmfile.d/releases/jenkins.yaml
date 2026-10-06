@@ -1,0 +1,40 @@
+---
+# Ports roles/jenkins (operator + CRs - not gitea_setup.yaml; see README and
+# examples/Jenkinsfile.stage for the webhook/pipeline side of this).
+#
+# Judgment call: same pattern as keycloak/ECK/jaeger - roles/jenkins installs
+# the jenkinsci/kubernetes-operator v0.8.0-beta2 CRD from GitHub plus a
+# locally vendored all-in-one.yaml (already committed in
+# roles/jenkins/files/operator/all-in-one.yaml, copied verbatim to
+# charts/raw-manifests/files/jenkins/ here). The CRD comes from the presync
+# hook below; the operator Deployment/RBAC itself is applied as a vendored
+# manifestFiles entry in jenkins-resources, since it was already vendored
+# rather than chart- or URL-installed.
+releases:
+  - name: jenkins-operator-crd
+    namespace: jenkins
+    createNamespace: true
+    chart: ../charts/raw-manifests
+    values:
+      - manifests: []
+    hooks:
+      - events: ["presync"]
+        showlogs: true
+        command: "kubectl"
+        args:
+          - "apply"
+          - "-f"
+          - "https://raw.githubusercontent.com/jenkinsci/kubernetes-operator/v0.8.0-beta2/config/crd/bases/jenkins.io_jenkins.yaml"
+
+  - name: jenkins-resources
+    namespace: jenkins
+    chart: ../charts/raw-manifests
+    # NB: also implicitly needs keycloak/keycloak-resources (realm) and
+    # gitea/gitea (the giteaServers config in the CASC ConfigMap assumes
+    # Gitea is reachable) - see the "Known gaps" note in README re: `needs`
+    # not spanning separate `helmfiles:` includes; ordering relies on
+    # keycloak.yaml and gitea.yaml coming first.
+    needs:
+      - jenkins/jenkins-operator-crd
+    values:
+      - ../values/jenkins-resources.yaml.gotmpl

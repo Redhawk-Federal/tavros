@@ -1,0 +1,19 @@
+---
+# Ports roles/kuma. Chart repo/name/version from roles/kuma/files/release.yaml
+# (Flux HelmRelease): kuma v2.13.5 from https://kumahq.github.io/charts.
+releases:
+  - name: kuma
+    namespace: kuma-system
+    createNamespace: true
+    chart: kuma/kuma
+    version: 2.13.5
+    values:
+      - ../values/kuma.yaml.gotmpl
+
+  - name: kuma-resources
+    namespace: kuma-system
+    chart: ../charts/raw-manifests
+    needs:
+      - kuma-system/kuma
+    values:
+      - ../values/kuma-resources.yaml.gotmpl

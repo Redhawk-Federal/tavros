@@ -1,0 +1,8 @@
+---
+releases:
+  - name: postgresql
+    namespace: postgresql
+    createNamespace: true
+    chart: ../charts/raw-manifests
+    values:
+      - ../values/postgresql.yaml.gotmpl

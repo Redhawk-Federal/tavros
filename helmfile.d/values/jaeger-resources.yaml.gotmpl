@@ -1,0 +1,226 @@
+{{- /*
+  Ports roles/jaeger/files/{jaeger,cronjob-spark-dependencies}.yaml and
+  templates/{ingress,keycloakclient,kongplugin-oidc,secret-es-creds,
+  secret-es-http-certs}.j2.
+*/ -}}
+{{- $cfqdn := .Environment.Values.cluster_fqdn }}
+{{- $jaeger := .Environment.Values.jaeger }}
+{{- $kong := .Environment.Values.kong }}
+manifests:
+  - apiVersion: jaegertracing.io/v1
+    kind: Jaeger
+    metadata:
+      name: tavros
+      namespace: jaeger
+    spec:
+      strategy: production
+      agent:
+        strategy: DaemonSet
+      ingress:
+        enabled: false
+        security: none
+      collector:
+        maxReplicas: 2
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+      ui:
+        options:
+          dependencies:
+            menuEnabled: true
+      storage:
+        type: elasticsearch
+        options:
+          es:
+            server-urls: http://tavros-es-http.elastic-system.svc:9200
+            index-prefix: tavros
+            tags-as-fields:
+              all: true
+            tls:
+              enabled: true
+              ca: /es/certificates/ca.crt
+        secretName: tavros-es-creds
+      volumeMounts:
+        - name: certificates
+          mountPath: /es/certificates/
+          readOnly: true
+      volumes:
+        - name: certificates
+          secret:
+            secretName: tavros-es-http-certs
+
+  - kind: CronJob
+    apiVersion: batch/v1
+    metadata:
+      name: tavros-spark-dependencies
+      namespace: jaeger
+      labels:
+        app: jaeger
+        app.kubernetes.io/component: spark-dependencies
+        app.kubernetes.io/instance: tavros
+        app.kubernetes.io/name: tavros-spark-dependencies
+        app.kubernetes.io/part-of: jaeger
+    spec:
+      schedule: "55 23 * * *"
+      concurrencyPolicy: Forbid
+      suspend: false
+      jobTemplate:
+        spec:
+          parallelism: 1
+          template:
+            metadata:
+              labels:
+                app: jaeger
+                app.kubernetes.io/component: spark-dependencies
+                app.kubernetes.io/instance: tavros
+                app.kubernetes.io/name: tavros-spark-dependencies
+                app.kubernetes.io/part-of: jaeger
+              annotations:
+                linkerd.io/inject: disabled
+                prometheus.io/scrape: "false"
+                sidecar.istio.io/inject: "false"
+            spec:
+              volumes:
+                - name: keystore-volume
+                  emptyDir: {}
+              containers:
+                - name: tavros-spark-dependencies
+                  image: quay.io/jam01/jaeger-spark-dependencies:0.0.1-SNAPSHOT-001
+                  envFrom:
+                    - secretRef:
+                        name: tavros-es-creds
+                  env:
+                    - name: STORAGE
+                      value: elasticsearch
+                    - name: ES_NODES
+                      value: "http://tavros-es-http.elastic-system.svc:9200"
+                    - name: ES_INDEX_PREFIX
+                      value: tavros
+                    - name: ES_TAGS_AS_FIELDS_ALL
+                      value: "true"
+                  resources:
+                    limits:
+                      memory: 2Gi
+                    requests:
+                      memory: 2Gi
+              restartPolicy: Never
+              terminationGracePeriodSeconds: 30
+              dnsPolicy: ClusterFirst
+      successfulJobsHistoryLimit: 3
+      failedJobsHistoryLimit: 1
+
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: tavros
+      namespace: jaeger
+      annotations:
+        cert-manager.io/cluster-issuer: tavros
+        kubernetes.io/ingress.class: {{ $kong.default_ingress_class }}
+        konghq.com/strip-path: "true"
+        konghq.com/protocols: https
+        konghq.com/https-redirect-status-code: "302"
+        konghq.com/plugins: tavros-oidc-jaeger
+    spec:
+      rules:
+        - host: jaeger.{{ $cfqdn }}
+          http:
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+                backend:
+                  service:
+                    name: tavros-query
+                    port:
+                      name: http-query
+      tls:
+        - hosts:
+            - jaeger.{{ $cfqdn }}
+          secretName: jaeger-ingress-cert
+
+  - apiVersion: keycloak.org/v1alpha1
+    kind: KeycloakClient
+    metadata:
+      name: tavros-jaeger
+      namespace: keycloak
+      labels:
+        client: jaeger
+    spec:
+      realmSelector:
+        matchLabels:
+          realm: {{ $jaeger.keycloak.realm }}
+      client:
+        clientId: jaeger
+        secret: "{{ $jaeger.keycloak.client_secret }}"
+        clientAuthenticatorType: client-secret
+        protocol: openid-connect
+        redirectUris:
+          - "https://jaeger.{{ $cfqdn }}/*"
+        directAccessGrantsEnabled: false
+        standardFlowEnabled: true
+        enabled: true
+        protocolMappers:
+          - name: roles
+            protocol: openid-connect
+            protocolMapper: "oidc-usermodel-client-role-mapper"
+            config:
+              id.token.claim: "false"
+              claim.name: roles
+              multivalued: "true"
+              userinfo.token.claim: "false"
+              jsonType.label: string
+              access.token.claim: "true"
+              usermodel.clientRoleMapping.clientId: jaeger
+      roles:
+        - name: "user"
+
+  {{- if gt (len $kong.ee_creds) 0 }}
+  - apiVersion: configuration.konghq.com/v1
+    kind: KongPlugin
+    metadata:
+      name: tavros-oidc-jaeger
+      namespace: jaeger
+      annotations:
+        kubernetes.io/ingress.class: {{ $kong.default_ingress_class }}
+    config:
+      issuer: "https://auth.{{ $cfqdn }}/auth/realms/{{ $jaeger.keycloak.realm }}"
+      client_id:
+        - jaeger
+      client_secret:
+        - "{{ $jaeger.keycloak.client_secret }}"
+      redirect_uri:
+        - https://jaeger.{{ $cfqdn }}
+      ssl_verify: false
+      roles_claim: ["roles"]
+      roles_required:
+        - user
+    plugin: openid-connect
+  {{- end }}
+
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: tavros-es-creds
+      namespace: jaeger
+    type: Opaque
+    stringData:
+      ES_USERNAME: jaeger
+      ES_PASSWORD: "{{ $jaeger.es.password }}"
+
+  # NB: roles/jaeger/tasks/main.yaml reads the ca.crt out of the live
+  # tavros-es-http-certs-public Secret (created by the ECK operator) and
+  # re-writes it here at apply time - a live-cluster read Ansible can do but
+  # a Helmfile values template (rendered offline) cannot. Options for a
+  # real deployment: a Helmfile `hooks.presync` that `kubectl get secret
+  # tavros-es-http-certs-public -o jsonpath=...` and feeds it in via
+  # `helmfile ... --set`, or an External Secret / Reflector that mirrors it
+  # automatically. Left as a placeholder here.
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: tavros-es-http-certs
+      namespace: jaeger
+    type: Opaque
+    stringData:
+      ca.crt: "CHANGEME-copy-from-tavros-es-http-certs-public-in-elastic-system"

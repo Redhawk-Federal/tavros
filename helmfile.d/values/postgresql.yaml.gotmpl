@@ -1,0 +1,174 @@
+{{- /*
+  Judgment call: despite the filename, roles/postgresql/templates/release.j2
+  is NOT a Helm chart HelmRelease - it's a raw Service x2 + StatefulSet
+  manifest running a single postgres:17 container (no bitnami/postgresql
+  chart reference exists anywhere in that role). This is ported faithfully
+  as raw manifests via the raw-manifests chart rather than swapped for the
+  Bitnami chart, to match what's actually running today. Revisit this for a
+  real environment - a single unreplicated StatefulSet with no backups is a
+  POC-grade Postgres, not a production one.
+
+  Also ports roles/postgresql/files/job-schema-init.yaml and the
+  schema-init.j2 script (creates the gitea/keycloak/<kong instance> DBs).
+*/ -}}
+{{- $v := .Environment.Values }}
+manifests:
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: tavros-postgresql
+      namespace: postgresql
+    spec:
+      selector:
+        app: tavros-postgresql
+      ports:
+        - name: postgresql
+          port: 5432
+          targetPort: 5432
+
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: tavros-postgresql-headless
+      namespace: postgresql
+    spec:
+      clusterIP: None
+      selector:
+        app: tavros-postgresql
+      ports:
+        - name: postgresql
+          port: 5432
+          targetPort: 5432
+
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: tavros-postgresql
+      namespace: postgresql
+    spec:
+      serviceName: tavros-postgresql-headless
+      replicas: 1
+      selector:
+        matchLabels:
+          app: tavros-postgresql
+      template:
+        metadata:
+          labels:
+            app: tavros-postgresql
+          {{- if $v.elastic_cloud.enabled }}
+          annotations:
+            co.elastic.logs.tavros-postgresql/enabled: "true"
+            co.elastic.logs.tavros-postgresql/module: "postgresql"
+          {{- end }}
+        spec:
+          containers:
+            - name: postgresql
+              image: docker.io/library/postgres:17
+              env:
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: tavros-pg-creds
+                      key: postgresql-password
+                - name: POSTGRES_DB
+                  value: postgres
+                - name: PGDATA
+                  value: /var/lib/postgresql/data/pgdata
+              ports:
+                - name: postgresql
+                  containerPort: 5432
+              readinessProbe:
+                exec:
+                  command: [pg_isready, -U, postgres]
+                initialDelaySeconds: 10
+                periodSeconds: 5
+                failureThreshold: 12
+              volumeMounts:
+                - name: data
+                  mountPath: /var/lib/postgresql/data
+      volumeClaimTemplates:
+        - metadata:
+            name: data
+          spec:
+            accessModes: [ReadWriteOnce]
+            resources:
+              requests:
+                storage: 8Gi
+
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: tavros-pg-creds
+      namespace: postgresql
+    type: Opaque
+    stringData:
+      postgresql-password: "{{ $v.postgresql.password }}"
+      postgresql-postgres-password: "{{ $v.postgresql.postgres_password }}"
+
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: tavros-schema-init-script
+      namespace: postgresql
+    type: Opaque
+    stringData:
+      script.sql: |-
+        CREATE DATABASE "gitea";
+        CREATE USER "gitea" WITH ENCRYPTED PASSWORD '{{ $v.gitea.pg.password }}';
+        GRANT ALL PRIVILEGES ON DATABASE "gitea" TO "gitea";
+        \c "gitea"
+        GRANT ALL ON SCHEMA public TO "gitea";
+
+        CREATE DATABASE "keycloak";
+        CREATE USER "keycloak" WITH ENCRYPTED PASSWORD '{{ $v.keycloak.pg.password }}';
+        GRANT ALL PRIVILEGES ON DATABASE "keycloak" TO "keycloak";
+        \c "keycloak"
+        GRANT ALL ON SCHEMA public TO "keycloak";
+        {{- range $v.kong.instances }}
+
+        CREATE DATABASE "{{ .name }}";
+        CREATE USER "{{ .name }}" WITH ENCRYPTED PASSWORD '{{ .pg.password }}';
+        GRANT ALL PRIVILEGES ON DATABASE "{{ .name }}" TO "{{ .name }}";
+        \c "{{ .name }}"
+        GRANT ALL ON SCHEMA public TO "{{ .name }}";
+        {{- end }}
+
+  - apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: tavros-schema-init
+      namespace: postgresql
+    spec:
+      template:
+        spec:
+          containers:
+            - name: schema-init
+              image: docker.io/library/postgres:14
+              command:
+                - "bin/bash"
+                - "-c"
+                - |
+                  until pg_isready -h $PG_HOST -p 5432 -U postgres
+                  do
+                    echo "Waiting for postgres at: $PG_HOST"
+                    sleep 5;
+                  done
+                  echo 'Running PSQL schema-init/script.sql'
+                  psql -h $PG_HOST -U postgres -f /tmp/schema-init/script.sql || { echo 'PSQL Setup failure' ; exit 1; }
+              env:
+                - name: PG_HOST
+                  value: tavros-postgresql.postgresql.svc.cluster.local
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: tavros-pg-creds
+                      key: postgresql-password
+              volumeMounts:
+                - name: schema-init-script
+                  mountPath: /tmp/schema-init
+          volumes:
+            - name: schema-init-script
+              secret:
+                secretName: tavros-schema-init-script
+          restartPolicy: OnFailure
+      backoffLimit: 4

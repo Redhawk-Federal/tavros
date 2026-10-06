@@ -1,0 +1,65 @@
+---
+# Ports roles/keycloak (Helm/operator install only - NOT the realm/client
+# bootstrap, which this role doesn't do via API calls anyway; it's all
+# declarative CRs already, see values/keycloak-resources.yaml.gotmpl).
+#
+# Judgment call: roles/keycloak does NOT install a Helm chart today - it
+# kustomize-applies the archived/EOL legacy keycloak-operator v19.0.3's CRDs
+# + operator.yaml + role/role_binding/service_account directly from GitHub
+# (roles/keycloak/files/operator/kustomization.yaml). There is no maintained
+# Helm chart for that specific legacy operator (the *current* Keycloak
+# Operator is a different, unrelated project using keycloak.org/v2alpha1).
+# For this POC we keep the exact same upstream manifests and apply them via
+# a Helmfile `hooks.presync` kubectl-apply, rather than hand-vendoring
+# several hundred lines of CRD/RBAC YAML into this repo. This is the one
+# place in this port that still shells out to kubectl instead of letting
+# Helm manage the resources - flagged here and in the README as a follow-up
+# (either vendor+pin the manifests as local chart files, or replace the
+# legacy operator entirely with the modern Keycloak Operator / its Helm
+# chart, which would also unblock dropping the v1alpha1 CRDs).
+releases:
+  - name: keycloak-operator
+    namespace: keycloak
+    createNamespace: true
+    chart: ../charts/raw-manifests
+    values:
+      - manifests: []
+    hooks:
+      - events: ["presync"]
+        showlogs: true
+        command: "kubectl"
+        args:
+          - "apply"
+          - "-f"
+          - "https://raw.githubusercontent.com/keycloak/keycloak-operator/19.0.3/deploy/crds/keycloak.org_keycloakbackups_crd.yaml"
+          - "-f"
+          - "https://raw.githubusercontent.com/keycloak/keycloak-operator/19.0.3/deploy/crds/keycloak.org_keycloakclients_crd.yaml"
+          - "-f"
+          - "https://raw.githubusercontent.com/keycloak/keycloak-operator/19.0.3/deploy/crds/keycloak.org_keycloakrealms_crd.yaml"
+          - "-f"
+          - "https://raw.githubusercontent.com/keycloak/keycloak-operator/19.0.3/deploy/crds/keycloak.org_keycloaks_crd.yaml"
+          - "-f"
+          - "https://raw.githubusercontent.com/keycloak/keycloak-operator/19.0.3/deploy/crds/keycloak.org_keycloakusers_crd.yaml"
+          - "-n"
+          - "keycloak"
+          - "-f"
+          - "https://raw.githubusercontent.com/keycloak/keycloak-operator/19.0.3/deploy/role.yaml"
+          - "-f"
+          - "https://raw.githubusercontent.com/keycloak/keycloak-operator/19.0.3/deploy/role_binding.yaml"
+          - "-f"
+          - "https://raw.githubusercontent.com/keycloak/keycloak-operator/19.0.3/deploy/service_account.yaml"
+          - "-f"
+          - "https://raw.githubusercontent.com/keycloak/keycloak-operator/19.0.3/deploy/operator.yaml"
+
+  - name: keycloak-resources
+    namespace: keycloak
+    chart: ../charts/raw-manifests
+    # NB: also implicitly needs cert-manager/cert-manager-resources (for the
+    # "tavros" ClusterIssuer the Ingress references) - Helmfile can't express
+    # `needs` across separate `helmfiles:` includes (see README "Known
+    # gaps"), so this is ordered only by cert-manager.yaml coming first in
+    # helmfile.yaml's `helmfiles:` list.
+    needs:
+      - keycloak/keycloak-operator
+    values:
+      - ../values/keycloak-resources.yaml.gotmpl

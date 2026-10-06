@@ -1,0 +1,7 @@
+---
+releases:
+  - name: namespaces
+    namespace: default
+    chart: ../charts/raw-manifests
+    values:
+      - ../values/namespaces.yaml.gotmpl

@@ -1,0 +1,86 @@
+{{- /*
+  Ports roles/gitea/templates/{ingress,keycloakclient,gitshell}.j2.
+  NOT ported: roles/gitea/files/configmap-ca-certs.yaml (only applied under
+  the Ansible 'test-run' tag, to trust a local staging CA in CI) and
+  roles/gitea/tasks/keycloak_sso.yaml (the imperative Gitea API calls that
+  wire up the OpenID Connect auth source - explicitly out of scope, see
+  README).
+*/ -}}
+{{- $cfqdn := .Environment.Values.cluster_fqdn }}
+{{- $gitea := .Environment.Values.gitea }}
+{{- $kong := .Environment.Values.kong }}
+manifests:
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: tavros
+      namespace: gitea
+      annotations:
+        cert-manager.io/cluster-issuer: tavros
+        kubernetes.io/ingress.class: {{ $kong.default_ingress_class }}
+        konghq.com/strip-path: "true"
+        konghq.com/protocols: https
+        konghq.com/https-redirect-status-code: "302"
+    spec:
+      rules:
+        - host: code.{{ $cfqdn }}
+          http:
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+                backend:
+                  service:
+                    name: gitea-http
+                    port:
+                      number: 3000
+      tls:
+        - hosts:
+            - code.{{ $cfqdn }}
+          secretName: gitea-ingress-cert
+
+  - apiVersion: keycloak.org/v1alpha1
+    kind: KeycloakClient
+    metadata:
+      name: tavros-gitea
+      namespace: keycloak
+      labels:
+        client: gitea
+    spec:
+      realmSelector:
+        matchLabels:
+          realm: {{ $gitea.keycloak.realm }}
+      client:
+        clientId: "gitea"
+        secret: "{{ $gitea.keycloak.client_secret }}"
+        clientAuthenticatorType: client-secret
+        protocol: openid-connect
+        redirectUris:
+          - "https://code.{{ $cfqdn }}/*"
+        directAccessGrantsEnabled: true
+        standardFlowEnabled: true
+        authorizationServicesEnabled: true
+        serviceAccountsEnabled: true
+        enabled: true
+
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: git-shell
+      namespace: gitea
+      labels:
+        app: git
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: git
+      template:
+        metadata:
+          labels:
+            app: git
+        spec:
+          containers:
+            - name: git
+              image: alpine/git:2.54.0
+              command: ["/bin/sh", "-c"]
+              args: ["while true; do sleep 30; done;"]

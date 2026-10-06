@@ -1,0 +1,228 @@
+{{- /*
+  Ports roles/nexus/files/{pvc-deploy,configmap-properties,
+  service-container-registry}.yaml and templates/{ingress,ingress-buildtools,
+  keycloakclient,kongplugin-oidc,secret-keycloak-config(+keycloak-config)}.j2.
+
+  NOT ported (explicitly out of scope): roles/nexus/tasks/configure-auth.yaml
+  and create-repositories.yaml - the imperative Nexus REST API calls that
+  configure the Keycloak realm role mapping and create repositories. Those
+  need a new home (a Jenkins post-apply job hitting the Nexus API, a Nexus
+  Terraform provider, etc.) - not attempted here.
+*/ -}}
+{{- $cfqdn := .Environment.Values.cluster_fqdn }}
+{{- $nexus := .Environment.Values.nexus }}
+{{- $kong := .Environment.Values.kong }}
+manifests:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: tavros-deploy
+      namespace: nexus
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Mi
+
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: tavros-properties
+      namespace: nexus
+    data:
+      nexus.properties: |
+        nexus.onboarding.enabled=false
+
+        # https://raw.githubusercontent.com/sonatype/nexus-public/release-3.29.0-02/assemblies/nexus-base-template/src/main/resources/overlay/etc/nexus-default.properties
+        # Jetty section
+        application-port=8081
+        application-host=0.0.0.0
+        nexus-args=${jetty.etc}/jetty.xml,${jetty.etc}/jetty-http.xml,${jetty.etc}/jetty-requestlog.xml
+        nexus-context-path=/
+
+        # Nexus section
+        nexus-edition=nexus-oss-edition
+        nexus-features=\
+         nexus-core-feature,\
+         nexus-cma-feature,\
+         nexus-repository-docker
+
+        nexus.upgrade.warnOnMissingDependencies=true
+
+        nexus.hazelcast.discovery.isEnabled=false
+
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: tavros-container-registry
+      namespace: nexus
+    spec:
+      selector:
+        app.kubernetes.io/instance: tavros
+        app.kubernetes.io/name: nexus-repository-manager
+      ports:
+        - protocol: TCP
+          port: 5002
+          targetPort: 5002
+      type: ClusterIP
+      sessionAffinity: None
+
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: tavros
+      namespace: nexus
+      annotations:
+        cert-manager.io/cluster-issuer: tavros
+        kubernetes.io/ingress.class: {{ $kong.default_ingress_class }}
+        konghq.com/strip-path: "true"
+        konghq.com/protocols: https
+        konghq.com/https-redirect-status-code: "302"
+        konghq.com/plugins: tavros-oidc-nexus
+    spec:
+      rules:
+        - host: artifacts.{{ $cfqdn }}
+          http:
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+                backend:
+                  service:
+                    name: tavros-nexus-repository-manager
+                    port:
+                      number: 8081
+      tls:
+        - hosts:
+            - artifacts.{{ $cfqdn }}
+          secretName: nexus-ingress-cert
+
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: tavros-buildtools
+      namespace: nexus
+      annotations:
+        cert-manager.io/cluster-issuer: tavros
+        kubernetes.io/ingress.class: {{ $kong.default_ingress_class }}
+        konghq.com/strip-path: "true"
+        konghq.com/protocols: https
+        konghq.com/https-redirect-status-code: "302"
+        konghq.com/plugins: nexus-oidc
+    spec:
+      rules:
+        - host: artifacts.{{ $cfqdn }}
+          http:
+            paths:
+              - path: /nosso
+                pathType: ImplementationSpecific
+                backend:
+                  service:
+                    name: tavros-nexus-repository-manager
+                    port:
+                      number: 8081
+        - host: registry.{{ $cfqdn }}
+          http:
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+                backend:
+                  service:
+                    name: tavros-container-registry
+                    port:
+                      number: 5002
+      tls:
+        - hosts:
+            - artifacts.{{ $cfqdn }}
+          secretName: nexus-ingress-cert
+        - hosts:
+            - registry.{{ $cfqdn }}
+          secretName: nexus-registry-ingress-cert
+
+  - apiVersion: keycloak.org/v1alpha1
+    kind: KeycloakClient
+    metadata:
+      name: tavros-nexus
+      namespace: keycloak
+      labels:
+        client: nexus
+    spec:
+      realmSelector:
+        matchLabels:
+          realm: {{ $nexus.keycloak.realm }}
+      client:
+        clientId: "nexus"
+        secret: "{{ $nexus.keycloak.client_secret }}"
+        clientAuthenticatorType: client-secret
+        protocol: openid-connect
+        redirectUris:
+          - "https://artifacts.{{ $cfqdn }}/*"
+        directAccessGrantsEnabled: true
+        standardFlowEnabled: true
+        authorizationServicesEnabled: true
+        serviceAccountsEnabled: true
+        enabled: true
+        defaultClientScopes:
+          - "email"
+          - "profile"
+          - "roles"
+          - "offline_access"
+          - "web-origins"
+          - "phone"
+          - "microprofile-jwt"
+          - "address"
+      serviceAccountClientRoles:
+        "realm-management":
+          - "view-clients"
+          - "view-users"
+          - "view-realm"
+      roles:
+        - name: "admin"
+        - name: "developer"
+
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: tavros-keycloak-config
+      namespace: nexus
+    type: Opaque
+    stringData:
+      keycloak-config.json: |-
+        {
+          "realm": "{{ $nexus.keycloak.realm }}",
+          "auth-server-url": "https://auth.{{ $cfqdn }}/auth/",
+          "ssl-required": "external",
+          "resource": "nexus",
+          "verify-token-audience": true,
+          "credentials": {
+            "secret": "{{ $nexus.keycloak.client_secret }}"
+          },
+          "use-resource-role-mappings": true,
+          "confidential-port": 0
+        }
+
+  {{- if gt (len $kong.ee_creds) 0 }}
+  - apiVersion: configuration.konghq.com/v1
+    kind: KongPlugin
+    metadata:
+      name: tavros-oidc-nexus
+      namespace: nexus
+      annotations:
+        kubernetes.io/ingress.class: {{ $kong.default_ingress_class }}
+    disabled: false
+    config:
+      issuer: "https://auth.{{ $cfqdn }}/auth/realms/{{ $nexus.keycloak.realm }}"
+      client_id:
+        - nexus
+      client_secret:
+        - "{{ $nexus.keycloak.client_secret }}"
+      redirect_uri:
+        - https://artifacts.{{ $cfqdn }}
+      ssl_verify: false
+      upstream_headers_claims:
+        - preferred_username
+      upstream_headers_names:
+        - "X-Auth-Username"
+      upstream_access_token_header: "X-Auth-Token"
+    plugin: openid-connect
+  {{- end }}

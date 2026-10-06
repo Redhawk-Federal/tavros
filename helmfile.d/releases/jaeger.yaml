@@ -1,0 +1,39 @@
+---
+# Ports roles/jaeger (operator + CRs). Judgment call: same pattern as
+# keycloak/ECK - roles/jaeger installs the jaeger-operator straight from
+# https://github.com/jaegertracing/jaeger-operator/releases/download/v1.62.0/jaeger-operator.yaml
+# (no Helm chart reference today), applied here via a presync kubectl hook.
+# jaegertracing does publish a `jaeger-operator` Helm chart
+# (https://jaegertracing.github.io/helm-charts) that would be a cleaner fit -
+# follow-up, same as the ECK note in releases/elastic-cloud.yaml.
+releases:
+  - name: jaeger-operator
+    namespace: jaeger
+    createNamespace: true
+    chart: ../charts/raw-manifests
+    values:
+      - manifests: []
+    hooks:
+      - events: ["presync"]
+        showlogs: true
+        command: "kubectl"
+        args:
+          - "apply"
+          - "-f"
+          - "https://github.com/jaegertracing/jaeger-operator/releases/download/v1.62.0/jaeger-operator.yaml"
+          - "-n"
+          - "jaeger"
+
+  - name: jaeger-resources
+    namespace: jaeger
+    chart: ../charts/raw-manifests
+    # NB: also implicitly needs keycloak/keycloak-resources (realm) and
+    # elastic-system/elastic-cloud-resources (tavros-es-http-certs-public to
+    # copy the ca.crt from, see the placeholder note in
+    # jaeger-resources.yaml.gotmpl) - see the "Known gaps" note in README
+    # re: `needs` not spanning separate `helmfiles:` includes; ordering
+    # relies on keycloak.yaml and elastic-cloud.yaml coming first.
+    needs:
+      - jaeger/jaeger-operator
+    values:
+      - ../values/jaeger-resources.yaml.gotmpl

@@ -1,0 +1,12 @@
+{{- /* Ports roles/kong/templates/secret-ee-license.j2, one per kong.ee_creds entry. */ -}}
+manifests:
+{{- range .Environment.Values.kong.ee_creds }}
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: {{ .name }}-ee-license
+      namespace: kong
+    type: Opaque
+    stringData:
+      license: "{{ .license }}"
+{{- end }}

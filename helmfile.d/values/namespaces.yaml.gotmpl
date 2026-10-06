@@ -1,0 +1,84 @@
+{{- /*
+  Ports roles/namespace: one Namespace (+ Kuma sidecar-injection labels),
+  one oidc-admin RoleBinding, one troubleshooting shell Deployment, and one
+  docker-registry pull Secret, per entry in .Environment.Values.namespaces.
+
+  Ported, per namespace:
+    - ns.j2                          -> Namespace
+    - rolebinding-oidc-ns-admin.j2   -> RoleBinding
+    - troubleshooting-shell.j2       -> Deployment
+    - secret-artifacts-registry.j2   -> Secret (dockerconfigjson)
+
+  Explicitly NOT ported (see README):
+    - tavros-repo.j2 (a Flux HelmRepository pointing at ms3inc.github.io/charts)
+      has no Flux-reconciliation equivalent needed here - Helmfile IS the
+      reconciler now, so there is nothing for this resource to do.
+    - the kubeseal step that sealed secret-artifacts-registry.yaml before
+      committing it for Flux. This values file writes the registry secret as
+      a plain (base64, not encrypted) Secret - fine for a POC, but replace
+      with SOPS-encrypted values (helm-secrets) or an External Secret before
+      this is used against a real cluster.
+*/ -}}
+manifests:
+{{- range $ns := .Environment.Values.namespaces }}
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: {{ $ns.name }}
+      {{- if $ns.kuma_mesh_name }}
+      labels:
+        kuma.io/sidecar-injection: enabled
+      annotations:
+        kuma.io/mesh: {{ $ns.kuma_mesh_name }}
+      {{- end }}
+
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: oidc-{{ $ns.name }}-admin
+      namespace: {{ $ns.name }}
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: cluster-admin
+    subjects:
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: "oidc:{{ $ns.name }}"
+
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: troubleshooting-shell
+      namespace: {{ $ns.name }}
+      labels:
+        app: troubleshooting
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: troubleshooting
+      template:
+        metadata:
+          labels:
+            app: troubleshooting
+        spec:
+          containers:
+            - name: troubleshooting
+              image: redhat/ubi9:9.2-696
+              command: ["/bin/bash", "-c", "--"]
+              args: ["while true; do sleep 30; done;"]
+              securityContext:
+                runAsUser: 1000
+                runAsGroup: 3000
+
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: tavros-artifacts-registry
+      namespace: {{ $ns.name }}
+    type: kubernetes.io/dockerconfigjson
+    stringData:
+      .dockerconfigjson: |-
+        {"auths":{"registry.{{ $.Environment.Values.cluster_fqdn }}":{"auth":"{{ printf "jenkins-ci:%s" $.Environment.Values.jenkins.keycloak.password | b64enc }}"}}}
+{{- end }}

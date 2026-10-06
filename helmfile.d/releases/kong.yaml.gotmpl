@@ -1,0 +1,97 @@
+---
+# Ports roles/kong. Chart repo/name/version read from
+# roles/kong/templates/release.j2 (Flux HelmRelease): kong v2.52.0 from
+# https://charts.konghq.com. The Ansible role loops over kong.instances and,
+# per instance, over ["secret-pg-creds","instance-kustomization","ingress"]
+# plus either one "release" (distributed) or two ("release-cp"/"release-dp"
+# for hybrid) - this file does the same via Go templating over
+# .Environment.Values.kong.instances, since Helmfile (unlike a single Helm
+# chart) can emit a variable number of releases from one state file.
+#
+# Each generated release carries `labels: {instance, role}` rather than
+# passing the instance object through the `values:` list, because Helmfile
+# (v1.8.1) does NOT merge an earlier inline-map `values:` entry into
+# `.Values` for a later `.gotmpl` entry in the same list, despite some older
+# docs/blog posts describing that trick - verified empirically against this
+# version. values/kong-release.yaml.gotmpl and kong-resources.yaml.gotmpl
+# instead read `.Release.Labels.instance`/`.role` and look the instance back
+# up in `.Environment.Values.kong.instances`, which (unlike `.Values`) *is*
+# reliably available in every release values template.
+#
+# namespace/kong (ns.yaml) is created once as part of kong-ee-creds below;
+# helmrepo.yaml has no equivalent - see the top-level `repositories:` block
+# in helmfile.yaml instead of a HelmRepository CR.
+{{- $kong := .Environment.Values.kong }}
+releases:
+  - name: kong-ee-creds
+    namespace: kong
+    createNamespace: true
+    chart: ../charts/raw-manifests
+    values:
+      - ../values/kong-ee-creds.yaml.gotmpl
+
+{{- range $inst := $kong.instances }}
+
+  - name: kong-{{ $inst.name }}-resources
+    namespace: kong
+    chart: ../charts/raw-manifests
+    labels:
+      instance: {{ $inst.name }}
+    # NB: this also needs cert-manager/cert-manager-resources (for the
+    # "tavros" ClusterIssuer the ingress below references, and - when
+    # hybrid - for the mTLS Certificates issued by "tavros-ca") and, when
+    # ee.enabled, keycloak/keycloak-resources (the KeycloakClient realm the
+    # OIDC admin-gui secret points at). Helmfile does not resolve `needs`
+    # across separate `helmfiles:` includes (see README "Known gaps"), so
+    # that ordering is enforced only by this file's position in
+    # helmfile.yaml's `helmfiles:` list (cert-manager and keycloak both
+    # come first) - apply cert-manager and keycloak before kong if you ever
+    # run these files independently rather than through the top-level
+    # helmfile.yaml.
+    needs:
+      - kong/kong-ee-creds
+    values:
+      - ../values/kong-resources.yaml.gotmpl
+
+  {{- if $inst.hybrid }}
+
+  - name: kong-{{ $inst.name }}-cp
+    namespace: kong
+    chart: kong/kong
+    version: 2.52.0
+    labels:
+      instance: {{ $inst.name }}
+      role: control_plane
+    needs:
+      - kong/kong-{{ $inst.name }}-resources
+    values:
+      - ../values/kong-release.yaml.gotmpl
+
+  - name: kong-{{ $inst.name }}-dp
+    namespace: kong
+    chart: kong/kong
+    version: 2.52.0
+    labels:
+      instance: {{ $inst.name }}
+      role: data_plane
+    needs:
+      - kong/kong-{{ $inst.name }}-cp
+    values:
+      - ../values/kong-release.yaml.gotmpl
+
+  {{- else }}
+
+  - name: kong-{{ $inst.name }}
+    namespace: kong
+    chart: kong/kong
+    version: 2.52.0
+    labels:
+      instance: {{ $inst.name }}
+      role: none
+    needs:
+      - kong/kong-{{ $inst.name }}-resources
+    values:
+      - ../values/kong-release.yaml.gotmpl
+
+  {{- end }}
+{{- end }}

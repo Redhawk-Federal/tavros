@@ -1,0 +1,20 @@
+---
+# Ports roles/cert_manager. Chart repo/name/version read from
+# roles/cert_manager/files/release.yaml (Flux HelmRelease) - preserved
+# exactly: cert-manager v1.11.0 from https://charts.jetstack.io.
+releases:
+  - name: cert-manager
+    namespace: cert-manager
+    createNamespace: true
+    chart: jetstack/cert-manager
+    version: 1.11.0
+    values:
+      - ../values/cert-manager.yaml.gotmpl
+
+  - name: cert-manager-resources
+    namespace: cert-manager
+    chart: ../charts/raw-manifests
+    needs:
+      - cert-manager/cert-manager
+    values:
+      - ../values/cert-manager-resources.yaml.gotmpl

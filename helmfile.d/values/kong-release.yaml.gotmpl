@@ -1,0 +1,232 @@
+{{- /*
+  Ports roles/kong/templates/release.j2 (the Kong Helm chart values) 1:1.
+  Instantiated once per entry in .Environment.Values.kong.instances (twice,
+  -cp/-dp, when that instance is hybrid) - see releases/kong.yaml, which
+  tags each generated release with labels.instance (the Kong instance name)
+  and labels.role ("control_plane" / "data_plane" / "none"). This file looks
+  the instance back up by name in .Environment.Values.kong.instances rather
+  than receiving it directly via .Values, since Helmfile does not merge an
+  earlier inline `values:` list entry into `.Values` for a later .gotmpl
+  entry in that same list (see the note in releases/kong.yaml.gotmpl).
+  https://github.com/Kong/charts/tree/kong-2.52.0/charts/kong
+*/ -}}
+{{- $instName := .Release.Labels.instance }}
+{{- $role := .Release.Labels.role }}
+{{- $i := dict }}
+{{- range $.Environment.Values.kong.instances }}
+  {{- if eq .name $instName }}
+    {{- $i = . }}
+  {{- end }}
+{{- end }}
+{{- $cfqdn := .Environment.Values.cluster_fqdn }}
+{{- $kong := .Environment.Values.kong }}
+{{- $elastic := .Environment.Values.elastic_cloud }}
+{{- $cloud := .Environment.Values.kubernetes_cluster.cloud_provider }}
+{{- $isCP := and $i.hybrid (eq $role "control_plane") }}
+{{- $isDP := and $i.hybrid (eq $role "data_plane") }}
+{{- $isDefaultIngress := eq $i.ingress_class $kong.default_ingress_class }}
+{{- if $i.ee.enabled }}
+image:
+  repository: kong/kong-gateway
+  tag: "3.9.1.1"
+{{- end }}
+env:
+{{- if $isCP }}
+  role: control_plane
+  cluster_mtls: pki
+  cluster_ca_cert: /etc/secrets/{{ $i.name }}-cp-cert/ca.crt
+  cluster_cert: /etc/secrets/{{ $i.name }}-cp-cert/tls.crt
+  cluster_cert_key: /etc/secrets/{{ $i.name }}-cp-cert/tls.key
+{{- end }}
+{{- if $isDP }}
+  role: data_plane
+  cluster_mtls: pki
+  cluster_ca_cert: /etc/secrets/{{ $i.name }}-dp-cert/ca.crt
+  cluster_cert: /etc/secrets/{{ $i.name }}-dp-cert/tls.crt
+  cluster_cert_key: /etc/secrets/{{ $i.name }}-dp-cert/tls.key
+  lua_ssl_trusted_certificate: /etc/secrets/{{ $i.name }}-dp-cert/tls.crt
+  cluster_server_name: kong-tavros-{{ $i.name }}-cp-kong-cluster.kong.svc.cluster.local
+  cluster_control_plane: kong-tavros-{{ $i.name }}-cp-kong-cluster.kong.svc.cluster.local:8005
+  cluster_telemetry_endpoint: kong-tavros-{{ $i.name }}-cp-kong-clustertelemetry.kong.svc.cluster.local:8006
+{{- end }}
+{{- if and $i.ee.enabled (not $isDP) }}
+  admin_api_uri: "https://admin-api.{{ $i.name }}.{{ $cfqdn }}"
+  admin_gui_url: "https://admin.{{ $i.name }}.{{ $cfqdn }}"
+  portal_api-url: "https://dev-portal-api{{ if not $isDefaultIngress }}.{{ $i.ingress_class }}{{ end }}.{{ $cfqdn }}"
+  portal_gui_host: "dev-portal{{ if not $isDefaultIngress }}.{{ $i.ingress_class }}{{ end }}.{{ $cfqdn }}"
+  portal_gui_protocol: "https"
+  password:
+    valueFrom:
+      secretKeyRef:
+        name: tavros-{{ $i.name }}-ee-admin-creds
+        key: password
+{{- end }}
+{{- if $elastic.enabled }}
+  # see: https://github.com/elastic/beats/pull/14505
+  # https://docs.konghq.com/gateway-oss/2.4.x/logging/
+  # https://nginx.org/en/docs/http/ngx_http_log_module.html#log_format
+  nginx_http_log_format: |
+    extended '$host $remote_addr - $remote_user [$time_local] ' '"$request" $status $body_bytes_sent ' '"$http_referer" "$http_user_agent"'
+  proxy_access_log: /dev/stdout extended
+{{- end }}
+  database: {{ if $isDP }}"off"{{ else }}postgres{{ end }}
+{{- if not $isDP }}
+  pg_host: tavros-postgresql.postgresql
+  pg_port: "5432"
+  pg_database:
+    valueFrom:
+      secretKeyRef:
+        name: tavros-{{ $i.name }}-pg-creds
+        key: pg_database
+  pg_user:
+    valueFrom:
+      secretKeyRef:
+        name: tavros-{{ $i.name }}-pg-creds
+        key: pg_user
+  pg_password:
+    valueFrom:
+      secretKeyRef:
+        name: tavros-{{ $i.name }}-pg-creds
+        key: pg_password
+{{- end }}
+ingressController:
+  enabled: {{ not $isDP }}
+{{- if not $isDP }}
+  ingressClass: {{ $i.ingress_class }}
+  installCRDs: false
+  env:
+    {{- if $isCP }}
+    publish_service: kong/kong-tavros-{{ $i.name }}-dp-kong-proxy
+    {{- end }}
+    # see https://github.com/Kong/charts/issues/224
+    kong_admin_tls_skip_verify: "true"
+    {{- if $i.ee.enabled }}
+    kong_admin_token:
+      valueFrom:
+        secretKeyRef:
+          name: tavros-{{ $i.name }}-ee-admin-creds
+          key: password
+    {{- end }}
+  resources:
+    limits:
+      cpu: 100m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+{{- end }}
+podAnnotations:
+{{- if $i.kuma_mesh_name }}
+  kuma.io/gateway: enabled
+  kuma.io/mesh: {{ $i.kuma_mesh_name }}
+{{- end }}
+{{- if $elastic.enabled }}
+  co.elastic.logs.proxy/enabled: "true"
+  co.elastic.logs.proxy/module: nginx
+  co.elastic.logs.proxy/fileset.stdout: access
+  co.elastic.logs.proxy/fileset.stderr: error
+{{- end }}
+{{- if $i.kuma_mesh_name }}
+podLabels:
+  kuma.io/sidecar-injection: enabled
+{{- end }}
+admin:
+  enabled: {{ not $isDP }}
+  http:
+    enabled: true
+proxy:
+  enabled: {{ not $isCP }}
+{{- if and (eq $cloud "aws") (not $isCP) }}
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
+{{- end }}
+{{- if $isDP }}
+portal:
+  enabled: false
+portalapi:
+  enabled: false
+manager:
+  enabled: false
+{{- end }}
+{{- if $i.ee.enabled }}
+enterprise:
+  enabled: true
+  license_secret: {{ $i.ee.creds }}-ee-license
+  vitals:
+    enabled: {{ not $isDP }}
+  portal:
+    enabled: {{ not $isDP }}
+  rbac:
+    enabled: {{ not $isDP }}
+  {{- if not $isDP }}
+    admin_gui_auth: openid-connect
+    session_conf_secret: tavros-{{ $i.name }}-ee-admin-gui-session
+    admin_gui_auth_conf_secret: tavros-{{ $i.name }}-ee-admin-gui-auth
+  {{- end }}
+{{- end }}
+{{- if $isCP }}
+cluster:
+  enabled: true
+  tls:
+    enabled: true
+    servicePort: 8005
+    containerPort: 8005
+clustertelemetry:
+  enabled: true
+  tls:
+    enabled: true
+    servicePort: 8006
+    containerPort: 8006
+{{- end }}
+{{- if $i.hybrid }}
+secretVolumes:
+  {{- if eq $role "control_plane" }}
+  - {{ $i.name }}-cp-cert
+  {{- else }}
+  - {{ $i.name }}-dp-cert
+  {{- end }}
+{{- end }}
+{{- if $isDP }}
+deployment:
+  userDefinedVolumeMounts:
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: default-token
+  userDefinedVolumes:
+    - name: default-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              expirationSeconds: 7200
+              path: token
+{{- end }}
+{{- if not $isCP }}
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/instance: kong-tavros-{{ $i.name }}{{ if $isDP }}-dp{{ end }}
+        app.kubernetes.io/name: kong
+resources:
+  limits:
+    cpu: 1
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+{{- if $isDefaultIngress }}
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 80
+{{- end }}
+{{- end }}

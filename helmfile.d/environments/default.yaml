@@ -1,0 +1,144 @@
+# Default environment values for the Helmfile GitOps POC.
+#
+# This mirrors playbooks/provision_playbook/default_vars.yaml (the shape the
+# Ansible role variables take today) so the same topology - one cluster, a
+# sandbox + prod Kong instance, a sandbox + prod Kuma mesh, dev/test/prod
+# namespaces, sandbox + prod Keycloak realms - can be reconstructed as
+# Helmfile `environments:` values instead of Ansible host/group vars.
+#
+# In the Ansible world, secrets (passwords, client secrets) are generated
+# on first run with `lookup('password', '/dev/null')` and then sealed with
+# kubeseal for Flux to apply. There is no kubeseal/SealedSecrets controller
+# in this POC's day-2 loop (see README "Secrets" section), so every secret
+# value below is an obvious CHANGEME placeholder. Before `helmfile apply`
+# against a real cluster, replace these with values injected from a secrets
+# manager / SOPS-encrypted values file - do not commit real secrets here.
+
+cluster_fqdn: "tavros.example.com"
+cluster_admin_email: "admin@tavros.example.com"
+
+kubernetes_cluster:
+  cloud_provider: "aws"
+  keycloak:
+    realm: prod
+    client_secret: "CHANGEME-kubernetes-client-secret"
+
+kong:
+  enabled: true
+  default_ingress_class: "prod"
+  ee_creds:
+    - name: default
+      license: "CHANGEME-kong-ee-license-json"
+  instances:
+    - name: "sandbox-kong"
+      hybrid: false
+      ingress_class: "sandbox"
+      kuma_mesh_name: "sandbox"
+      pg:
+        password: "CHANGEME-sandbox-kong-pg-password"
+      ee:
+        enabled: true
+        creds: "default"
+        admin_password: "CHANGEME-sandbox-kong-admin-password"
+        keycloak:
+          realm: "sandbox"
+          client_secret: "CHANGEME-sandbox-kong-keycloak-client-secret"
+    - name: "prod-kong"
+      hybrid: false
+      ingress_class: "prod"
+      kuma_mesh_name: "prod"
+      pg:
+        password: "CHANGEME-prod-kong-pg-password"
+      ee:
+        enabled: true
+        creds: "default"
+        admin_password: "CHANGEME-prod-kong-admin-password"
+        keycloak:
+          realm: "prod"
+          client_secret: "CHANGEME-prod-kong-keycloak-client-secret"
+
+kuma:
+  enabled: true
+  meshes:
+    - name: "sandbox"
+      mtls:
+        enabled: true
+      traffictrace:
+        enabled: true
+    - name: "prod"
+      mtls:
+        enabled: true
+      traffictrace:
+        enabled: true
+
+namespaces:
+  - name: "dev"
+    kuma_mesh_name: "sandbox"
+  - name: "test"
+    kuma_mesh_name: "sandbox"
+  - name: "prod"
+    kuma_mesh_name: "prod"
+
+keycloak:
+  enabled: true
+  pg:
+    password: "CHANGEME-keycloak-pg-password"
+  realms:
+    - name: sandbox
+      admin_password: "CHANGEME-sandbox-realm-admin-password"
+    - name: prod
+      admin_password: "CHANGEME-prod-realm-admin-password"
+
+postgresql:
+  password: "CHANGEME-postgresql-password"
+  postgres_password: "CHANGEME-postgresql-postgres-password"
+
+cert_manager:
+  enabled: true
+
+sealed_secrets:
+  # Not used by any release in this cluster now that kubeseal/Flux is gone -
+  # kept installed only so a future pass can reintroduce sealed, at-rest
+  # secrets management without re-deriving the chart choice. See README.
+  enabled: true
+
+gitea:
+  enabled: true
+  admin_password: "CHANGEME-gitea-admin-password"
+  pg:
+    password: "CHANGEME-gitea-pg-password"
+  keycloak:
+    realm: "prod"
+    client_secret: "CHANGEME-gitea-keycloak-client-secret"
+
+nexus:
+  enabled: true
+  keycloak:
+    realm: "prod"
+    client_secret: "CHANGEME-nexus-keycloak-client-secret"
+
+elastic_cloud:
+  enabled: true
+  ee:
+    enabled: false
+    trial: true
+    license: ""
+    keycloak:
+      realm: "prod"
+      client_secret: "CHANGEME-elastic-cloud-keycloak-client-secret"
+
+jaeger:
+  enabled: true
+  keycloak:
+    realm: "prod"
+    client_secret: "CHANGEME-jaeger-keycloak-client-secret"
+  es:
+    password: "CHANGEME-jaeger-es-password"
+
+jenkins:
+  enabled: true
+  keycloak:
+    realm: "prod"
+    password: "CHANGEME-jenkins-keycloak-password"
+  gitea:
+    password: "CHANGEME-jenkins-gitea-password"
