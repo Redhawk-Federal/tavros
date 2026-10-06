@@ -1,0 +1,152 @@
+{% set issuer = "https://auth." + cluster_fqdn + "/auth/realms/" + grafana_stack.keycloak.realm %}
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tavros
+  namespace: {{ grafana_stack.namespace }}
+spec:
+  targetNamespace: {{ grafana_stack.namespace }}
+  releaseName: tavros
+  interval: 30m
+  timeout: 15m
+  chart:
+    spec:
+      # https://github.com/prometheus-community/helm-charts/tree/kube-prometheus-stack-91.8.2/charts/kube-prometheus-stack
+      chart: kube-prometheus-stack
+      version: 91.8.2
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    fullnameOverride: tavros
+    cleanPrometheusOperatorObjectNames: true
+
+    kubeControllerManager:
+      enabled: {{ grafana_stack.scrape_control_plane | bool | lower }}
+    kubeScheduler:
+      enabled: {{ grafana_stack.scrape_control_plane | bool | lower }}
+    kubeEtcd:
+      enabled: {{ grafana_stack.scrape_control_plane | bool | lower }}
+    kubeProxy:
+      enabled: {{ grafana_stack.scrape_control_plane | bool | lower }}
+
+    prometheus:
+      prometheusSpec:
+        retention: {{ grafana_stack.prometheus.retention }}
+        resources:
+{{ grafana_stack.resources.prometheus | to_nice_yaml(indent=2) | indent(10, true) }}
+        # Pick up ServiceMonitors, PodMonitors, ScrapeConfigs, Probes and rules
+        # from every namespace, not only the ones labelled for this release.
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        ruleSelectorNilUsesHelmValues: false
+        probeSelectorNilUsesHelmValues: false
+        scrapeConfigSelectorNilUsesHelmValues: false
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: {{ grafana_stack.prometheus.storage }}
+
+    alertmanager:
+      alertmanagerSpec:
+{% if grafana_stack.alertmanager.slack_webhook %}
+        secrets: ["tavros-alertmanager-slack"]
+{% endif %}
+        resources:
+{{ grafana_stack.resources.alertmanager | to_nice_yaml(indent=2) | indent(10, true) }}
+        storage:
+          volumeClaimTemplate:
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: {{ grafana_stack.alertmanager.storage }}
+{% if grafana_stack.alertmanager.slack_webhook %}
+      config:
+        route:
+          receiver: slack
+          group_by: ["alertname", "namespace"]
+          routes:
+            - receiver: "null"
+              matchers: ['alertname = "Watchdog"']
+        receivers:
+          - name: "null"
+          - name: slack
+            slack_configs:
+              - api_url_file: /etc/alertmanager/secrets/tavros-alertmanager-slack/url
+                send_resolved: true
+{% endif %}
+
+    grafana:
+      admin:
+        existingSecret: tavros-grafana
+        userKey: admin-user
+        passwordKey: admin-password
+      envValueFrom:
+        GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
+          secretKeyRef:
+            name: tavros-grafana
+            key: oauth-client-secret
+      grafana.ini:
+        server:
+          root_url: https://grafana.{{ cluster_fqdn }}
+        analytics:
+          check_for_updates: false
+          reporting_enabled: false
+        auth:
+          # keep the local form for the break-glass admin account
+          disable_login_form: false
+          oauth_auto_login: false
+          signout_redirect_url: {{ issuer }}/protocol/openid-connect/logout?post_logout_redirect_uri=https%3A%2F%2Fgrafana.{{ cluster_fqdn }}%2Flogin&client_id=grafana
+        auth.generic_oauth:
+          enabled: true
+          name: Keycloak
+          allow_sign_up: true
+          client_id: grafana
+          scopes: openid profile email
+          use_pkce: true
+          auth_url: {{ issuer }}/protocol/openid-connect/auth
+          token_url: {{ issuer }}/protocol/openid-connect/token
+          api_url: {{ issuer }}/protocol/openid-connect/userinfo
+          login_attribute_path: preferred_username
+          email_attribute_path: email
+          name_attribute_path: name
+          role_attribute_path: "contains(roles[*], 'admin') && 'Admin' || contains(roles[*], 'editor') && 'Editor' || 'Viewer'"
+          allow_assign_grafana_admin: true
+          tls_skip_verify_insecure: {{ grafana_stack.tls_skip_verify | bool | lower }}
+{% if grafana_stack.loki.enabled %}
+      additionalDataSources:
+        - name: Loki
+          type: loki
+          uid: loki
+          access: proxy
+          url: {{ grafana_stack_loki_url }}
+          jsonData:
+            maxLines: 5000
+{% endif %}
+      resources:
+{{ grafana_stack.resources.grafana | to_nice_yaml(indent=2) | indent(8, true) }}
+      persistence:
+        enabled: true
+        size: {{ grafana_stack.grafana.storage }}
+      sidecar:
+        dashboards:
+          enabled: true
+          label: grafana_dashboard
+          labelValue: "1"
+          searchNamespace: ALL
+          folderAnnotation: grafana_folder
+          provider:
+            foldersFromFilesStructure: true

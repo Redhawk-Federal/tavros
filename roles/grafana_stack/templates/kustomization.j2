@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Applied in this order by the role (reorder=none): sources before releases.
+resources:
+  - ns.yaml
+  - helmrepo.yaml
+{% if grafana_stack.loki.enabled %}
+  - helmrepo-grafana.yaml
+{% endif %}
+  - secret-grafana.yaml
+  - release.yaml
+{% if grafana_stack.loki.enabled %}
+  - release-loki.yaml
+  - alloy-config.yaml
+  - release-alloy.yaml
+  - loki-rules.yaml
+{% endif %}
+  - keycloakclient.yaml
+  - ingress.yaml
+  - dashboards.yaml

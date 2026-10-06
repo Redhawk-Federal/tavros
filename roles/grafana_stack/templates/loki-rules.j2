@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tavros-loki-rules
+  namespace: {{ grafana_stack.namespace }}
+  labels:
+    # picked up by the Loki chart's rules sidecar
+    loki_rule: "1"
+data:
+  tavros-logs.yaml: |
+    groups:
+      - name: tavros-logs
+        rules:
+          - alert: TavrosHighErrorLogRate
+            # Lines at error level (JSON level label) or containing ERROR /
+            # Exception / FATAL, per app, over the last 5 minutes.
+            expr: |
+              sum by (namespace, app) (
+                count_over_time({namespace=~".+", level=~"(?i)error|fatal"} [5m])
+                or
+                count_over_time({namespace=~".+", level=""} |~ "(?i)\\b(error|exception|fatal)\\b" [5m])
+              ) > {{ grafana_stack.loki.error_alert.threshold }}
+            for: {{ grafana_stack.loki.error_alert.for }}
+            labels:
+              severity: warning
+            annotations:
+              summary: "Many error log lines in {% raw %}{{ $labels.namespace }}/{{ $labels.app }}{% endraw %}"
+              description: "{% raw %}{{ $value }}{% endraw %} error lines in 5 minutes (threshold {{ grafana_stack.loki.error_alert.threshold }})."

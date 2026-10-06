@@ -1,0 +1,15 @@
+{% for dashboard in grafana_stack_dashboards %}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tavros-dashboard-{{ dashboard | basename | splitext | first }}
+  namespace: {{ grafana_stack.namespace }}
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Tavros
+data:
+  {{ dashboard | basename }}: |
+    {{ lookup('ansible.builtin.file', dashboard) | indent(4) }}
+{% endfor %}

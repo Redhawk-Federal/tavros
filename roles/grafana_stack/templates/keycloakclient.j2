@@ -1,0 +1,47 @@
+apiVersion: keycloak.org/v1alpha1
+kind: KeycloakClient
+metadata:
+  name: tavros-grafana
+  namespace: {{ grafana_stack_keycloak_namespace }}
+  labels:
+    client: grafana
+spec:
+  realmSelector:
+    matchLabels:
+      realm: {{ grafana_stack.keycloak.realm }}
+  client:
+    clientId: grafana
+    secret: {{ grafana_stack.keycloak.client_secret }}
+    clientAuthenticatorType: client-secret
+    protocol: openid-connect
+    redirectUris:
+    - "https://grafana.{{ cluster_fqdn }}/login/generic_oauth"
+    webOrigins:
+    - "https://grafana.{{ cluster_fqdn }}"
+    # Clients created through the legacy operator get no default scopes, and
+    # Grafana requests "openid profile email" (Keycloak answers invalid_scope).
+    defaultClientScopes:
+    - profile
+    - email
+    - roles
+    - web-origins
+    directAccessGrantsEnabled: false
+    standardFlowEnabled: true
+    enabled: true
+    protocolMappers:
+    - name: roles
+      protocol: openid-connect
+      protocolMapper: "oidc-usermodel-client-role-mapper"
+      config:
+        # Grafana evaluates role_attribute_path against the ID token and userinfo
+        id.token.claim: "true"
+        userinfo.token.claim: "true"
+        access.token.claim: "true"
+        claim.name: roles
+        multivalued: "true"
+        jsonType.label: string
+        usermodel.clientRoleMapping.clientId: grafana
+  roles:
+  - name: "admin"
+  - name: "editor"
+  - name: "viewer"

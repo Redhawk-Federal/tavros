@@ -21,6 +21,8 @@ from ansible.errors import AnsibleError
 from ansible.plugins.lookup import LookupBase
 from ansible.utils.display import Display
 
+import os
+import tempfile
 from subprocess import CalledProcessError, PIPE, run
 import yaml
 
@@ -34,20 +36,34 @@ class LookupModule(LookupBase):
 
         for term in terms:
             display.debug("Kustomize lookup term: %s" % term)
-            # See: https://github.com/fluxcd/flux2/discussions/1304#discussioncomment-638319
-            args = ['kustomize', '--enable_kyaml=false', '--allow_id_changes=false', '--load_restrictor=LoadRestrictionsNone', 'build']
+            # kustomize v5 removed --enable_kyaml, --allow_id_changes and --reorder,
+            # and renamed --load_restrictor to --load-restrictor.
+            args = ['kustomize', 'build', '--load-restrictor=LoadRestrictionsNone']
 
-            if self.reorder is not None:
-                args.extend(['--reorder', self.reorder])
+            with tempfile.TemporaryDirectory() as wrapper:
+                target = term
+                # 'none' used to mean "keep input order"; in kustomize v5 that is
+                # sortOptions.order=fifo, which is only honoured on the top-level
+                # kustomization, so wrap the term in one.
+                if self.reorder == 'none':
+                    with open(os.path.join(wrapper, 'kustomization.yaml'), 'w') as f:
+                        yaml.safe_dump({
+                            'apiVersion': 'kustomize.config.k8s.io/v1beta1',
+                            'kind': 'Kustomization',
+                            'sortOptions': {'order': 'fifo'},
+                            # kustomize rejects absolute resource paths
+                            'resources': [os.path.relpath(os.path.abspath(term), wrapper)],
+                        }, f)
+                    target = wrapper
 
-            args.append(term)
+                args.append(target)
 
-            try:
-                result = run(args, check=True, stderr=PIPE, stdout=PIPE)
-                resources = yaml.safe_load_all(result.stdout)
-                ret.extend(resources)
+                try:
+                    result = run(args, check=True, stderr=PIPE, stdout=PIPE)
+                    resources = yaml.safe_load_all(result.stdout)
+                    ret.extend(r for r in resources if r is not None)
 
-            except CalledProcessError as err:
-                raise AnsibleError('error running kustomize (%s) command: %s' % (' '.join(args), err.stderr))
+                except CalledProcessError as err:
+                    raise AnsibleError('error running kustomize (%s) command: %s' % (' '.join(args), err.stderr))
 
         return ret

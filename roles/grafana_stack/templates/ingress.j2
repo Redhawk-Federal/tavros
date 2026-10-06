@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tavros-grafana
+  namespace: {{ grafana_stack.namespace }}
+  annotations:
+    cert-manager.io/cluster-issuer: tavros
+    kubernetes.io/ingress.class: {{ kong.default_ingress_class }}
+    konghq.com/protocols: https
+    konghq.com/https-redirect-status-code: '302'
+spec:
+  rules:
+  - host: grafana.{{ cluster_fqdn }}
+    http:
+      paths:
+      - path: /
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: tavros-grafana
+            port:
+              name: http-web
+  tls:
+  - hosts:
+    - grafana.{{ cluster_fqdn }}
+    secretName: grafana-ingress-cert

@@ -35,6 +35,8 @@ This log lists the architectural decisions for Tavros.
 - [ADR-0028](0028-use-markdown-architectural-decision-records.md) - Use Markdown Architectural Decision Records
 - [ADR-0029](0029-tavros-as-a-single-tenant-platform.md) - Tavros as a Single Tenant Platform
 
+- [ADR-0031](0031-grafana-stack-as-an-optional-metrics-platform.md) - Grafana Stack as an Optional Metrics Platform
+
 <!-- adrlogstop -->
 
 For new ADRs, please use [template.md](template.md) as basis.

@@ -97,6 +97,10 @@ all:
       enabled: true
       keycloak:
         realm: "prod"
+    grafana_stack:
+      enabled: false
+      keycloak:
+        realm: "prod"
     jenkins:
       enabled: true
       keycloak:

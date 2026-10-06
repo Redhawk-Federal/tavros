@@ -1,0 +1,84 @@
+# Alloy configuration in its own ConfigMap: the chart's configMap.content
+# goes through Helm's tpl, which would evaluate the Go-template braces of
+# Alloy's stage.template (e.g. ToLower) as a Helm template and fail.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tavros-alloy-config
+  namespace: {{ grafana_stack.namespace }}
+data:
+  config.alloy: |
+    logging {
+      level  = "info"
+      format = "logfmt"
+    }
+
+    // Every pod scheduled on this node; unlike Filebeat's hints, no
+    // annotation is needed for a pod's logs to be collected.
+    discovery.kubernetes "pods" {
+      role = "pod"
+      selectors {
+        role  = "pod"
+        field = "spec.nodeName=" + sys.env("NODE_NAME")
+      }
+    }
+
+    discovery.relabel "pods" {
+      targets = discovery.kubernetes.pods.targets
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_node_name"]
+        target_label  = "node"
+      }
+      // app = first non-empty of app.kubernetes.io/name, app, k8s-app,
+      // then the container name, so every stream has one
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name", "__meta_kubernetes_pod_label_app", "__meta_kubernetes_pod_label_k8s_app", "__meta_kubernetes_pod_container_name"]
+        separator     = ";"
+        regex         = "^;*([^;]+).*$"
+        target_label  = "app"
+      }
+    }
+
+    loki.source.kubernetes "pods" {
+      targets    = discovery.relabel.pods.output
+      forward_to = [loki.process.pods.receiver]
+    }
+
+    loki.process "pods" {
+      // JSON logs: promote the level to a label so dashboards and alerts
+      // can filter on it. "log.level" is the ECS layout of the Camel
+      // archetypes; "level" covers most other JSON loggers. Non-JSON
+      // lines pass through unchanged.
+      stage.json {
+        expressions = { ecs_level = "\"log.level\"", json_level = "level" }
+      }
+      // One lowercase label value per level across loggers
+      // (ERROR/error, WARNING/warn...); empty for non-JSON lines.
+      stage.template {
+        source   = "level"
+        template = {% raw %}"{{ if .json_level }}{{ ToLower .json_level }}{{ else if .ecs_level }}{{ ToLower .ecs_level }}{{ end }}"{% endraw %}
+
+      }
+      stage.labels {
+        values = { level = "" }
+      }
+      forward_to = [loki.write.default.receiver]
+    }
+
+    loki.write "default" {
+      endpoint {
+        url = "{{ grafana_stack_loki_url }}/loki/api/v1/push"
+      }
+    }

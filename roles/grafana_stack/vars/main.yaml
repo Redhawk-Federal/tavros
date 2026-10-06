@@ -1,0 +1,18 @@
+---
+# Names and endpoints shared by several templates, defined once. Internal to
+# the role (not meant to be overridden); the namespace itself is configurable
+# through grafana_stack.namespace.
+grafana_stack_loki_url: "http://tavros-loki.{{ grafana_stack.namespace }}.svc:3100"
+grafana_stack_alertmanager_url: "http://tavros-alertmanager.{{ grafana_stack.namespace }}.svc:9093"
+grafana_stack_keycloak_namespace: keycloak
+
+# Where each scraped platform component runs and which port serves metrics.
+grafana_stack_targets:
+  kong: { namespace: kong, port: 8100 }
+  kuma:
+    namespace: kuma-system
+    port: 5680            # control plane metrics
+    mads_port: 5676       # monitoring assignment service (data plane discovery)
+    dataplane_port: 5670  # MeshMetric endpoint exposed by every data plane
+  flux: { namespace: flux-system, port: 8080 }
+  cert_manager: { namespace: cert-manager, port: 9402 }

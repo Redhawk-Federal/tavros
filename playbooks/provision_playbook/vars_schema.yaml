@@ -258,6 +258,67 @@ properties:
             type: string
     required:
       - enabled
+  grafana_stack:
+    type: object
+    properties:
+      enabled:
+        type: boolean
+      namespace:
+        type: string
+      keycloak:
+        type: object
+        properties:
+          realm:
+            type: string
+          client_secret:
+            type: string
+      prometheus:
+        type: object
+        properties:
+          retention:
+            type: string
+          storage:
+            type: string
+      alertmanager:
+        type: object
+        properties:
+          slack_webhook:
+            type: string
+          storage:
+            type: string
+      grafana:
+        type: object
+        properties:
+          admin_password:
+            type: string
+          storage:
+            type: string
+      resources:
+        type: object
+        additionalProperties:
+          type: object
+      scrape_control_plane:
+        type: boolean
+      tls_skip_verify:
+        type: boolean
+      loki:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+          retention:
+            type: string
+          storage:
+            type: string
+          error_alert:
+            type: object
+            properties:
+              threshold:
+                type: integer
+              for:
+                type: string
+    required:
+      - enabled
   jenkins:
     type: object
     properties:

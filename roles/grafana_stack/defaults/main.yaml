@@ -1,0 +1,54 @@
+---
+# Merged under the user's `grafana_stack` variable in tasks/main.yaml, so an
+# inventory only has to set the keys it wants to change.
+grafana_stack_defaults:
+  enabled: false
+  # Namespace of every resource of the stack (releases, secrets, ingress).
+  namespace: monitoring
+  keycloak:
+    realm: "prod"
+  prometheus:
+    retention: "15d"
+    storage: "20Gi"
+  alertmanager:
+    slack_webhook: ""
+    storage: "2Gi"
+  grafana:
+    storage: "2Gi"
+  # Container resources per component, passed through to the chart values.
+  # Requests are always set so the scheduler can place the pods; memory limits
+  # are set for the components whose usage is bounded. Prometheus has no
+  # limit because its memory grows with series cardinality: size it for your
+  # cluster. Override a whole component, e.g. `resources.prometheus.limits`.
+  resources:
+    prometheus:
+      requests: { cpu: 200m, memory: 1Gi }
+    alertmanager:
+      requests: { cpu: 25m, memory: 64Mi }
+    grafana:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { memory: 1Gi }
+    loki:
+      requests: { cpu: 100m, memory: 512Mi }
+      limits: { memory: 2Gi }
+    alloy:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { memory: 512Mi }
+  # Scrape kube-controller-manager, kube-scheduler, etcd and kube-proxy. Off by
+  # default: kOps and kind bind them to localhost, so the targets are down and
+  # the chart's TargetDown alerts fire for nothing. Enable once they listen on
+  # the node address.
+  scrape_control_plane: false
+  # Logs: Loki (single binary, filesystem storage) + Grafana Alloy collecting
+  # every pod's logs. Requires grafana_stack.enabled.
+  loki:
+    enabled: false
+    retention: "168h"
+    storage: "10Gi"
+    # TavrosHighErrorLogRate: error lines per app over 5 minutes
+    error_alert:
+      threshold: 50
+      for: "5m"
+  # Only for clusters whose platform certificates are not publicly trusted
+  # (e.g. the local kind profile, issued by tavros-ca).
+  tls_skip_verify: false
